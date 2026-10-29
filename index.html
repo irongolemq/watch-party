@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rutube Watch Party — Синхронный просмотр</title>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <style>
+    :root {
+      --bg-primary: #0b0e14;
+      --bg-secondary: #131822;
+      --bg-tertiary: #1c2331;
+      --border-color: #263042;
+      --text-primary: #f0f4f8;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent: #00a8e8;
+      --accent-hover: #0090c7;
+      --accent-glow: rgba(0, 168, 232, 0.2);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --radius: 10px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.5;
+    }
+
+    .app-container {
+      width: 100%;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      flex: 1;
+    }
+
+    /* Верхняя панель */
+    .top-panel {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    }
+
+    .top-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .brand-and-status {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand {
+      font-weight: 700;
+      font-size: 1.1rem;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-primary);
+    }
+
+    .brand-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent);
+    }
+
+    .status-badges {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 11px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+    }
+
+    .status-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--warning);
+      transition: background-color 0.25s ease;
+    }
+
+    .status-indicator.online {
+      background: var(--success);
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+    }
+
+    .status-indicator.error {
+      background: var(--danger);
+    }
+
+    .url-bar {
+      display: flex;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .input-url {
+      flex: 1;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .input-url::placeholder {
+      color: var(--text-muted);
+    }
+
+    .input-url:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 9px 16px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      white-space: nowrap;
+      user-select: none;
+    }
+
+    .btn:hover:not(:disabled) {
+      background: #252f42;
+      border-color: #38465f;
+    }
+
+    .btn:active:not(:disabled) {
+      transform: translateY(1px);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
+
+    .btn-sync {
+      background: rgba(0, 168, 232, 0.14);
+      border-color: rgba(0, 168, 232, 0.4);
+      color: #5ce1e6;
+    }
+
+    .btn-sync:hover:not(:disabled) {
+      background: rgba(0, 168, 232, 0.24);
+      border-color: var(--accent);
+    }
+
+    /* Основная часть: Плеер 16:9 */
+    .player-wrapper {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #05070a;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    }
+
+    .player-wrapper iframe {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
+
+    .player-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+      color: var(--text-secondary);
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .player-placeholder.hidden {
+      display: none;
+    }
+
+    .player-placeholder-icon {
+      font-size: 2.5rem;
+      opacity: 0.7;
+    }
+
+    .player-placeholder-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .player-placeholder-sub {
+      font-size: 0.86rem;
+      color: var(--text-muted);
+      max-width: 460px;
+    }
+
+    /* Нижняя панель */
+    .bottom-panel {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    }
+
+    .controls-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .player-telemetry {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .telemetry-pill {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      padding: 5px 10px;
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    .log-container {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px 12px;
+      height: 150px;
+      overflow-y: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.8rem;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .log-entry {
+      display: flex;
+      gap: 8px;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .log-time {
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .log-msg {
+      color: var(--text-secondary);
+    }
+
+    .log-entry.info .log-msg {
+      color: var(--text-primary);
+    }
+
+    .log-entry.sync .log-msg {
+      color: #5ce1e6;
+    }
+
+    .log-entry.peer .log-msg {
+      color: #34d399;
+    }
+
+    .log-entry.warn .log-msg {
+      color: #fbbf24;
+    }
+
+    @media (max-width: 640px) {
+      .app-container {
+        padding: 10px;
+        gap: 12px;
+      }
+
+      .url-bar {
+        flex-direction: column;
+      }
+
+      .controls-row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .btn {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Верхняя панель -->
+    <header class="top-panel">
+      <div class="top-row">
+        <div class="brand-and-status">
+          <div class="brand">
+            <span class="brand-dot"></span>
+            <span>Rutube Watch Party</span>
+          </div>
+          <div class="status-badges">
+            <div class="badge" id="connectionBadge">
+              <span class="status-indicator" id="statusDot"></span>
+              <span id="statusText">Ожидание...</span>
+            </div>
+            <div class="badge" title="Количество подключенных друзей">
+              <span>Пиров:</span>
+              <strong id="peerCount">0</strong>
+            </div>
+          </div>
+        </div>
+
+        <button class="btn" id="copyRoomBtn" type="button" disabled>
+          📋 Скопировать ссылку на комнату
+        </button>
+      </div>
+
+      <div class="url-bar">
+        <input
+          type="text"
+          id="videoUrlInput"
+          class="input-url"
+          placeholder="Вставьте ссылку на видео Rutube (например, https://rutube.ru/video/c6582a09.../)"
+          autocomplete="off"
+        />
+        <button class="btn btn-primary" id="loadVideoBtn" type="button">
+          ▶ Загрузить для всех
+        </button>
+      </div>
+    </header>
+
+    <!-- Основная часть: Адаптивный плеер 16:9 -->
+    <main class="player-wrapper">
+      <div class="player-placeholder" id="playerPlaceholder">
+        <div class="player-placeholder-icon">🎬</div>
+        <div class="player-placeholder-title">Видео ещё не выбрано</div>
+        <div class="player-placeholder-sub">
+          Вставьте ссылку на ролик с Rutube в поле выше и нажмите «Загрузить для всех», чтобы начать синхронный просмотр.
+        </div>
+      </div>
+      <iframe
+        id="rutubePlayer"
+        src="about:blank"
+        allow="autoplay; fullscreen; picture-in-picture; encrypted-media; gyroscope; accelerometer; clipboard-write"
+        allowfullscreen
+        webkitAllowFullScreen
+        mozallowfullscreen
+      ></iframe>
+    </main>
+
+    <!-- Нижняя панель -->
+    <footer class="bottom-panel">
+      <div class="controls-row">
+        <button class="btn btn-sync" id="forceSyncBtn" type="button">
+          ⚡ Синхронизировать всех ко мне
+        </button>
+
+        <div class="player-telemetry">
+          <span>Локальный плеер:</span>
+          <span class="telemetry-pill" id="localStateLabel">Ожидание</span>
+          <span class="telemetry-pill" id="localTimeLabel">00:00</span>
+        </div>
+      </div>
+
+      <div class="log-container" id="eventLog" aria-live="polite"></div>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      // --- Константы синхронизации ---
+      const SYNC_THRESHOLD_SEC = 2.0;      // Порог рассинхрона: не перематывать если разница < 2 сек
+      const REMOTE_LOCK_MS = 750;          // Блокировка обратной связи (feedback loop) 500-800 мс
+
+      // --- DOM элементы ---
+      const statusDot = document.getElementById('statusDot');
+      const statusText = document.getElementById('statusText');
+      const peerCountEl = document.getElementById('peerCount');
+      const copyRoomBtn = document.getElementById('copyRoomBtn');
+      const videoUrlInput = document.getElementById('videoUrlInput');
+      const loadVideoBtn = document.getElementById('loadVideoBtn');
+      const playerIframe = document.getElementById('rutubePlayer');
+      const playerPlaceholder = document.getElementById('playerPlaceholder');
+      const forceSyncBtn = document.getElementById('forceSyncBtn');
+      const localStateLabel = document.getElementById('localStateLabel');
+      const localTimeLabel = document.getElementById('localTimeLabel');
+      const eventLog = document.getElementById('eventLog');
+
+      // --- Состояние плеера и синхронизации ---
+      let currentEmbedUrl = '';
+      let localState = 'paused';           // 'playing' | 'paused'
+      let localCurrentTime = 0;            // Текущее время в секундах
+      let lastTimeUpdateWallClock = 0;     // Время последнего события currentTime (Date.now())
+      let isRemoteAction = false;          // Флаг защиты от эхо-цикла
+      let remoteActionTimer = null;
+      let seekBroadcastTimer = null;
+      let pendingInitSync = null;          // Состояние для применения после загрузки iframe
+
+      // --- Состояние сети (PeerJS) ---
+      const urlParams = new URLSearchParams(window.location.search);
+      const roomParam = urlParams.get('room');
+      const isHost = !roomParam;
+      let peer = null;
+      let hostConnection = null;           // Для гостя: соединение с Хостом
+      const guestConnections = new Map();  // Для Хоста: peerId -> DataConnection
+
+      // --- Логирование ---
+      function formatTimecode(seconds) {
+        if (typeof seconds !== 'number' || isNaN(seconds) || seconds < 0) return '00:00';
+        const total = Math.floor(seconds);
+        const hrs = Math.floor(total / 3600);
+        const mins = Math.floor((total % 3600) / 60);
+        const secs = total % 60;
+        const mm = String(mins).padStart(2, '0');
+        const ss = String(secs).padStart(2, '0');
+        return hrs > 0 ? `${hrs}:${mm}:${ss}` : `${mm}:${ss}`;
+      }
+
+      function addLog(message, type = 'info') {
+        const now = new Date();
+        const timeStr = now.toTimeString().split(' ')[0];
+        const entry = document.createElement('div');
+        entry.className = `log-entry ${type}`;
+
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'log-time';
+        timeSpan.textContent = `[${timeStr}]`;
+
+        const msgSpan = document.createElement('span');
+        msgSpan.className = 'log-msg';
+        msgSpan.textContent = message;
+
+        entry.appendChild(timeSpan);
+        entry.appendChild(msgSpan);
+        eventLog.appendChild(entry);
+        eventLog.scrollTop = eventLog.scrollHeight;
+      }
+
+      function updateTelemetryUI() {
+        localStateLabel.textContent = localState === 'playing' ? '▶ Играет' : '⏸ Пауза';
+        localTimeLabel.textContent = formatTimecode(localCurrentTime);
+      }
+
+      function setConnectionStatus(label, mode) {
+        statusText.textContent = label;
+        statusDot.className = 'status-indicator';
+        if (mode === 'online') statusDot.classList.add('online');
+        if (mode === 'error') statusDot.classList.add('error');
+      }
+
+      function updatePeerCount(count) {
+        peerCountEl.textContent = String(count);
+      }
+
+      // --- Защита от эхо-цикла (feedback loop) ---
+      function lockRemoteAction(durationMs = REMOTE_LOCK_MS) {
+        isRemoteAction = true;
+        if (remoteActionTimer) {
+          clearTimeout(remoteActionTimer);
+        }
+        remoteActionTimer = setTimeout(() => {
+          isRemoteAction = false;
+        }, durationMs);
+      }
+
+      // --- Парсинг ссылки Rutube ---
+      function parseRutubeToEmbed(rawInput) {
+        if (!rawInput) return null;
+        const input = rawInput.trim();
+
+        // Регулярное выражение для ссылок вида:
+        // https://rutube.ru/video/c6582a09.../
+        // https://rutube.ru/video/private/c6582a09.../?p=...
+        // https://rutube.ru/play/embed/c6582a09...
+        // https://rutube.ru/shorts/c6582a09.../
+        const regex = /rutube\.ru\/(?:video\/(?:private\/)?|play\/embed\/|shorts\/)([a-zA-Z0-9_-]{16,64})/i;
+        const match = input.match(regex);
+
+        let videoId = match ? match[1] : null;
+        let privateKey = null;
+
+        try {
+          const parsedUrl = new URL(input);
+          if (parsedUrl.searchParams.has('p')) {
+            privateKey = parsedUrl.searchParams.get('p');
+          }
+        } catch (_) {
+          // Если вставили просто 32-символьный ID видео без домена
+          if (!videoId && /^[a-f0-9]{32}$/i.test(input)) {
+            videoId = input;
+          }
+        }
+
+        if (!videoId) return null;
+
+        let embedUrl = `https://rutube.ru/play/embed/${videoId}`;
+        if (privateKey) {
+          embedUrl += `?p=${encodeURIComponent(privateKey)}`;
+        }
+        return embedUrl;
+      }
+
+      // --- Команды для Rutube Iframe API ---
+      function sendCommandToPlayer(type, data = {}) {
+        if (!playerIframe || !playerIframe.contentWindow || !currentEmbedUrl) return;
+        const payload = JSON.stringify({ type, data });
+        playerIframe.contentWindow.postMessage(payload, '*');
+      }
+
+      function playPlayer() {
+        sendCommandToPlayer('player:play', {});
+      }
+
+      function pausePlayer() {
+        sendCommandToPlayer('player:pause', {});
+      }
+
+      function seekPlayer(seconds) {
+        const target = Math.max(0, Number(seconds) || 0);
+        sendCommandToPlayer('player:setCurrentTime', { time: target });
+      }
+
+      // --- Загрузка видео в плеер ---
+      function loadEmbedVideo(embedUrl, options = {}) {
+        const { isRemote = false, initialTime = 0, initialState = 'paused' } = options;
+        if (!embedUrl) return;
+
+        lockRemoteAction(1000);
+        currentEmbedUrl = embedUrl;
+        localCurrentTime = initialTime || 0;
+        localState = initialState || 'paused';
+        lastTimeUpdateWallClock = 0;
+
+        playerPlaceholder.classList.add('hidden');
+        if (playerIframe.src !== embedUrl) {
+          playerIframe.src = embedUrl;
+        }
+        videoUrlInput.value = embedUrl;
+        updateTelemetryUI();
+
+        if (initialTime > 0 || initialState === 'playing') {
+          pendingInitSync = { time: initialTime, state: initialState };
+        } else {
+          pendingInitSync = null;
+        }
+
+        addLog(
+          isRemote
+            ? `Загружено видео по сети: ${embedUrl}`
+            : `Видео загружено для всех: ${embedUrl}`,
+          'sync'
+        );
+      }
+
+      // --- Применение входящей команды синхронизации ---
+      function applyRemoteSyncCommand(payload) {
+        const { action, state, time, embedUrl, force = false } = payload;
+
+        // Если у пира загружено другое видео — подгружаем его
+        if (embedUrl && embedUrl !== currentEmbedUrl) {
+          loadEmbedVideo(embedUrl, {
+            isRemote: true,
+            initialTime: typeof time === 'number' ? time : 0,
+            initialState: state || 'paused'
+          });
+          return;
+        }
+
+        lockRemoteAction(REMOTE_LOCK_MS);
+
+        // Сверка времени с учетом порога рассинхрона 2 секунды (либо принудительно)
+        if (typeof time === 'number' && !isNaN(time)) {
+          const diff = Math.abs(time - localCurrentTime);
+          if (force || diff >= SYNC_THRESHOLD_SEC) {
+            seekPlayer(time);
+            localCurrentTime = time;
+            lastTimeUpdateWallClock = Date.now();
+          }
+        }
+
+        // Применение статуса воспроизведения
+        if (state === 'playing') {
+          localState = 'playing';
+          playPlayer();
+        } else if (state === 'paused') {
+          localState = 'paused';
+          pausePlayer();
+        }
+
+        updateTelemetryUI();
+
+        const tc = formatTimecode(typeof time === 'number' ? time : localCurrentTime);
+        if (action === 'force-sync') {
+          addLog(`Принудительная синхронизация: ${state === 'playing' ? 'Воспроизведение' : 'Пауза'} на ${tc}`, 'sync');
+        } else if (action === 'seek') {
+          addLog(`Друг перемотал на ${tc}`, 'sync');
+        } else if (state === 'playing') {
+          addLog(`Воспроизведение на ${tc}`, 'sync');
+        } else if (state === 'paused') {
+          addLog(`Пауза на ${tc}`, 'sync');
+        }
+      }
+
+      // --- Обработка событий от Rutube Iframe через window.addEventListener('message') ---
+      window.addEventListener('message', (event) => {
+        if (!event.data) return;
+
+        let message;
+        try {
+          message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+        } catch (_) {
+          return;
+        }
+
+        if (!message || typeof message.type !== 'string') return;
+
+        // Если плеер только загрузился и есть отложенная синхронизация (например, гость вошел в активную комнату)
+        if (
+          pendingInitSync &&
+          (message.type === 'player:ready' ||
+            message.type === 'player:durationChange' ||
+            message.type === 'player:currentTime')
+        ) {
+          const initData = pendingInitSync;
+          pendingInitSync = null;
+          setTimeout(() => {
+            applyRemoteSyncCommand({
+              action: 'force-sync',
+              state: initData.state,
+              time: initData.time,
+              force: true
+            });
+          }, 400);
+        }
+
+        // 1. Текущее время плеера
+        if (message.type === 'player:currentTime' && message.data && typeof message.data.time === 'number') {
+          const newTime = message.data.time;
+          const now = Date.now();
+          const prevTime = localCurrentTime;
+          const elapsedWallSec = lastTimeUpdateWallClock > 0 ? (now - lastTimeUpdateWallClock) / 1000 : 0;
+
+          localCurrentTime = newTime;
+          lastTimeUpdateWallClock = now;
+          updateTelemetryUI();
+
+          // Детектируем ручную перемотку ползунка пользователем внутри iframe
+          if (!isRemoteAction && elapsedWallSec > 0 && elapsedWallSec < 5) {
+            const expectedDelta = localState === 'playing' ? elapsedWallSec : 0;
+            const actualDelta = Math.abs(newTime - prevTime);
+            const drift = Math.abs(actualDelta - expectedDelta);
+
+            if (drift >= 2.5) {
+              if (seekBroadcastTimer) clearTimeout(seekBroadcastTimer);
+              seekBroadcastTimer = setTimeout(() => {
+                if (!isRemoteAction) {
+                  addLog(`Перемотка на ${formatTimecode(localCurrentTime)}`, 'info');
+                  sendNetworkMessage({
+                    type: 'sync',
+                    action: 'seek',
+                    state: localState,
+                    time: localCurrentTime,
+                    embedUrl: currentEmbedUrl
+                  });
+                }
+              }, 250);
+            }
+          }
+          return;
+        }
+
+        // 2. Смена статуса плеера (playing / paused)
+        if (message.type === 'player:changeState' && message.data && message.data.state) {
+          const newState = message.data.state;
+          if (newState !== 'playing' && newState !== 'paused') {
+            return;
+          }
+
+          // Если переключение вызвано сетевой командой — игнорируем (защита от эхо-цикла)
+          if (isRemoteAction) {
+            localState = newState;
+            updateTelemetryUI();
+            return;
+          }
+
+          // Игнорируем дублирующиеся события того же статуса
+          if (localState === newState) {
+            return;
+          }
+
+          localState = newState;
+          updateTelemetryUI();
+
+          const tc = formatTimecode(localCurrentTime);
+          addLog(
+            newState === 'playing'
+              ? `Вы включили воспроизведение на ${tc}`
+              : `Вы поставили паузу на ${tc}`,
+            'info'
+          );
+
+          sendNetworkMessage({
+            type: 'sync',
+            action: 'state-change',
+            state: localState,
+            time: localCurrentTime,
+            embedUrl: currentEmbedUrl
+          });
+        }
+      });
+
+      // --- P2P Сеть (PeerJS) ---
+      function broadcastFromHost(data, excludePeerId = null) {
+        guestConnections.forEach((conn, peerId) => {
+          if (peerId !== excludePeerId && conn.open) {
+            conn.send(data);
+          }
+        });
+      }
+
+      function sendNetworkMessage(data) {
+        if (isHost) {
+          broadcastFromHost(data);
+        } else if (hostConnection && hostConnection.open) {
+          hostConnection.send(data);
+        }
+      }
+
+      function broadcastRoomCount() {
+        if (!isHost) return;
+        const count = guestConnections.size;
+        updatePeerCount(count);
+        broadcastFromHost({
+          type: 'room-info',
+          peerCount: count
+        });
+      }
+
+      function handleIncomingData(data, senderPeerId = null) {
+        if (!data || typeof data.type !== 'string') return;
+
+        // Если мы Хост — ретранслируем синхронизационные сообщения от одного гостя всем остальным гостям
+        if (isHost && (data.type === 'sync' || data.type === 'load-video')) {
+          broadcastFromHost(data, senderPeerId);
+        }
+
+        if (data.type === 'room-info') {
+          if (typeof data.peerCount === 'number') {
+            updatePeerCount(data.peerCount);
+          }
+          return;
+        }
+
+        if (data.type === 'load-video' && data.embedUrl) {
+          loadEmbedVideo(data.embedUrl, {
+            isRemote: true,
+            initialTime: data.time || 0,
+            initialState: data.state || 'paused'
+          });
+          return;
+        }
+
+        if (data.type === 'sync') {
+          applyRemoteSyncCommand(data);
+        }
+      }
+
+      function initPeerNetwork() {
+        setConnectionStatus('Ожидание...', 'waiting');
+        addLog('Инициализация P2P-соединения (PeerJS)...', 'info');
+
+        peer = new Peer();
+
+        peer.on('open', (myId) => {
+          copyRoomBtn.disabled = false;
+
+          if (isHost) {
+            // Вшиваем Peer ID Хоста в URL через ?room=ID
+            const newUrl = `${window.location.pathname}?room=${encodeURIComponent(myId)}`;
+            window.history.replaceState(null, '', newUrl);
+            setConnectionStatus('Хост', 'online');
+            addLog(`Комната создана. Вы — Хост (ID: ${myId.slice(0, 8)}...)`, 'peer');
+          } else {
+            setConnectionStatus('Ожидание...', 'waiting');
+            connectToHost(roomParam);
+          }
+        });
+
+        // Только для Хоста: прием входящих подключений от друзей
+        peer.on('connection', (conn) => {
+          if (!isHost) return;
+
+          conn.on('open', () => {
+            guestConnections.set(conn.peer, conn);
+            addLog(`Друг подключился (${conn.peer.slice(0, 8)}...)`, 'peer');
+            broadcastRoomCount();
+
+            // Отправляем новому участнику текущее видео и таймкод комнаты
+            if (currentEmbedUrl) {
+              conn.send({
+                type: 'load-video',
+                embedUrl: currentEmbedUrl,
+                time: localCurrentTime,
+                state: localState
+              });
+            }
+          });
+
+          conn.on('data', (data) => {
+            handleIncomingData(data, conn.peer);
+          });
+
+          conn.on('close', () => {
+            guestConnections.delete(conn.peer);
+            addLog(`Друг отключился (${conn.peer.slice(0, 8)}...)`, 'warn');
+            broadcastRoomCount();
+          });
+
+          conn.on('error', () => {
+            guestConnections.delete(conn.peer);
+            broadcastRoomCount();
+          });
+        });
+
+        peer.on('error', (err) => {
+          setConnectionStatus('Ошибка сети', 'error');
+          addLog(`Ошибка PeerJS: ${err.type || err.message}`, 'warn');
+        });
+      }
+
+      function connectToHost(hostId) {
+        addLog(`Подключение к комнате Хоста (${hostId.slice(0, 8)}...)...`, 'info');
+        hostConnection = peer.connect(hostId, { reliable: true });
+
+        hostConnection.on('open', () => {
+          setConnectionStatus('Подключено к комнате', 'online');
+          addLog('Успешно подключено к комнате Хоста!', 'peer');
+        });
+
+        hostConnection.on('data', (data) => {
+          handleIncomingData(data);
+        });
+
+        hostConnection.on('close', () => {
+          setConnectionStatus('Отключено от Хоста', 'error');
+          updatePeerCount(0);
+          addLog('Соединение с Хостом потеряно', 'warn');
+        });
+
+        hostConnection.on('error', () => {
+          setConnectionStatus('Ошибка подключения', 'error');
+          addLog('Не удалось подключиться к Хосту', 'warn');
+        });
+      }
+
+      // --- Обработчики кнопок интерфейса ---
+      copyRoomBtn.addEventListener('click', async () => {
+        const shareUrl = window.location.href;
+        try {
+          await navigator.clipboard.writeText(shareUrl);
+          const originalText = copyRoomBtn.textContent;
+          copyRoomBtn.textContent = '✅ Ссылка скопирована!';
+          addLog('Ссылка на комнату скопирована в буфер обмена', 'info');
+          setTimeout(() => {
+            copyRoomBtn.textContent = originalText;
+          }, 2000);
+        } catch (_) {
+          window.prompt('Скопируйте ссылку на комнату:', shareUrl);
+        }
+      });
+
+      function handleLoadVideoClick() {
+        const rawUrl = videoUrlInput.value;
+        const embedUrl = parseRutubeToEmbed(rawUrl);
+
+        if (!embedUrl) {
+          addLog('Неверная ссылка Rutube. Пример: https://rutube.ru/video/c6582a09.../', 'warn');
+          videoUrlInput.focus();
+          return;
+        }
+
+        loadEmbedVideo(embedUrl, { isRemote: false, initialTime: 0, initialState: 'paused' });
+
+        sendNetworkMessage({
+          type: 'load-video',
+          embedUrl: embedUrl,
+          time: 0,
+          state: 'paused'
+        });
+      }
+
+      loadVideoBtn.addEventListener('click', handleLoadVideoClick);
+      videoUrlInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleLoadVideoClick();
+        }
+      });
+
+      forceSyncBtn.addEventListener('click', () => {
+        if (!currentEmbedUrl) {
+          addLog('Сначала загрузите видео для синхронизации', 'warn');
+          return;
+        }
+
+        const tc = formatTimecode(localCurrentTime);
+        addLog(
+          `Вы запустили принудительную синхронизацию всех ко времени ${tc} (${localState === 'playing' ? 'Играет' : 'Пауза'})`,
+          'sync'
+        );
+
+        sendNetworkMessage({
+          type: 'sync',
+          action: 'force-sync',
+          state: localState,
+          time: localCurrentTime,
+          embedUrl: currentEmbedUrl,
+          force: true
+        });
+      });
+
+      // Запуск приложения
+      initPeerNetwork();
+    })();
+  </script>
+</body>
+</html>
