@@ -472,8 +472,9 @@
       'use strict';
 
       // --- Константы синхронизации ---
-      const SYNC_THRESHOLD_SEC = 2.0;      // Порог рассинхрона: не перематывать если разница < 2 сек
-      const REMOTE_LOCK_MS = 750;          // Блокировка обратной связи (feedback loop) 500-800 мс
+      const SYNC_THRESHOLD_SEC = 2.0;      // Порог рассинхрона при проверке времени (2 сек)
+      const REMOTE_LOCK_MS = 750;          // Защита от эхо-цикла (feedback loop)
+      const PLAY_LEAD_COMPENSATION = 0.45; // Компенсация буферизации и пинга при перемотке в режиме воспроизведения
 
       // Конфигурация STUN + TURN серверов для обхода NAT и VPN в WebRTC (PeerJS)
       const PEERJS_CONFIG = {
@@ -525,11 +526,14 @@
       // --- Состояние плеера и синхронизации ---
       let currentEmbedUrl = '';
       let localState = 'paused';           // 'playing' | 'paused'
-      let localCurrentTime = 0;            // Текущее время в секундах
-      let lastTimeUpdateWallClock = 0;     // Время последнего события currentTime (Date.now())
+      let localCurrentTime = 0;            // Последнее полученное время от плеера в секундах
+      let lastTimeUpdateWallClock = 0;     // Wall-clock время последнего события currentTime (Date.now())
       let isRemoteAction = false;          // Флаг защиты от эхо-цикла
       let remoteActionTimer = null;
       let seekBroadcastTimer = null;
+      let pauseEnforceTimers = [];         // Таймеры повторного подтверждения паузы после перемотки
+      let lastStateBroadcastAt = 0;
+      let lastBroadcastedState = '';
       let pendingInitSync = null;          // Состояние для применения после загрузки iframe
 
       // --- Идентификация клиента и комнаты ---
@@ -552,7 +556,6 @@
       let roomId = urlParams.get('room');
       const savedHostRoom = sessionStorage.getItem('wp_host_room');
 
-      // Если открыли без ?room= или обновили вкладку Хоста — остаемся Хостом этой комнаты
       let isHost = false;
       if (!roomId) {
         roomId = generateShortId('wp');
@@ -581,7 +584,7 @@
       const textEncoder = new TextEncoder();
       const textDecoder = new TextDecoder();
 
-      // --- Логирование и UI ---
+      // --- Вспомогательные функции ---
       function formatTimecode(seconds) {
         if (typeof seconds !== 'number' || isNaN(seconds) || seconds < 0) return '00:00';
         const total = Math.floor(seconds);
@@ -591,6 +594,34 @@
         const mm = String(mins).padStart(2, '0');
         const ss = String(secs).padStart(2, '0');
         return hrs > 0 ? `${hrs}:${mm}:${ss}` : `${mm}:${ss}`;
+      }
+
+      // Вычисляет точное текущее время плеера с учетом миллисекунд, прошедших с последнего события currentTime
+      function getLiveCurrentTime() {
+        if (localState === 'playing' && lastTimeUpdateWallClock > 0) {
+          const elapsedSec = (Date.now() - lastTimeUpdateWallClock) / 1000;
+          if (elapsedSec > 0 && elapsedSec < 1.2) {
+            return localCurrentTime + elapsedSec;
+          }
+        }
+        return localCurrentTime;
+      }
+
+      // Нормализует названия статусов плеера Rutube ('pause' / 'paused' / 'stopped' -> 'paused', 'play' / 'playing' -> 'playing')
+      function normalizePlayerState(rawState) {
+        if (!rawState || typeof rawState !== 'string') return null;
+        const s = rawState.trim().toLowerCase();
+        if (s === 'playing' || s === 'play') return 'playing';
+        if (s === 'paused' || s === 'pause' || s === 'stopped' || s === 'completed' || s === 'ended') {
+          return 'paused';
+        }
+        return null;
+      }
+
+      function clearPauseEnforceTimers() {
+        while (pauseEnforceTimers.length > 0) {
+          clearTimeout(pauseEnforceTimers.pop());
+        }
       }
 
       function addLog(message, type = 'info') {
@@ -693,6 +724,7 @@
       }
 
       function playPlayer() {
+        clearPauseEnforceTimers();
         sendCommandToPlayer('player:play', {});
       }
 
@@ -710,10 +742,11 @@
         const { isRemote = false, initialTime = 0, initialState = 'paused' } = options;
         if (!embedUrl) return;
 
-        lockRemoteAction(1000);
+        clearPauseEnforceTimers();
+        lockRemoteAction(900);
         currentEmbedUrl = embedUrl;
         localCurrentTime = initialTime || 0;
-        localState = initialState || 'paused';
+        localState = normalizePlayerState(initialState) || 'paused';
         lastTimeUpdateWallClock = 0;
 
         playerPlaceholder.classList.add('hidden');
@@ -723,8 +756,8 @@
         videoUrlInput.value = embedUrl;
         updateTelemetryUI();
 
-        if (initialTime > 0 || initialState === 'playing') {
-          pendingInitSync = { time: initialTime, state: initialState };
+        if (initialTime > 0 || localState === 'playing') {
+          pendingInitSync = { time: initialTime, state: localState };
         } else {
           pendingInitSync = null;
         }
@@ -739,7 +772,8 @@
 
       // --- Применение входящей команды синхронизации ---
       function applyRemoteSyncCommand(payload) {
-        const { action, state, time, embedUrl, force = false } = payload;
+        const { action, time, embedUrl, force = false } = payload;
+        const state = normalizePlayerState(payload.state) || payload.state;
 
         if (embedUrl && embedUrl !== currentEmbedUrl) {
           loadEmbedVideo(embedUrl, {
@@ -750,23 +784,49 @@
           return;
         }
 
+        clearPauseEnforceTimers();
         lockRemoteAction(REMOTE_LOCK_MS);
 
+        let didSeek = false;
         if (typeof time === 'number' && !isNaN(time)) {
-          const diff = Math.abs(time - localCurrentTime);
+          const diff = Math.abs(time - getLiveCurrentTime());
+          // При проверке времени не перематываем, если разница меньше 2 секунд (либо принудительно по кнопке)
           if (force || diff >= SYNC_THRESHOLD_SEC) {
-            seekPlayer(time);
-            localCurrentTime = time;
+            // Если видео играет, добавляем компенсацию буферизации и пинга (+0.45 сек), чтобы убрать отставание 0.5-1 сек
+            const targetTime = state === 'playing' ? time + PLAY_LEAD_COMPENSATION : time;
+            seekPlayer(targetTime);
+            localCurrentTime = targetTime;
             lastTimeUpdateWallClock = Date.now();
+            didSeek = true;
           }
         }
 
         if (state === 'playing') {
           localState = 'playing';
           playPlayer();
+          if (didSeek) {
+            // Подтверждаем play после завершения seek внутри Rutube плеера
+            setTimeout(() => {
+              if (localState === 'playing') {
+                lockRemoteAction(500);
+                playPlayer();
+              }
+            }, 180);
+          }
         } else if (state === 'paused') {
           localState = 'paused';
           pausePlayer();
+          // В Rutube перемотка (setCurrentTime) или буферизация может автоматически снять паузу через ~150-300 мс,
+          // поэтому дублируем команду паузы внутри окна блокировки isRemoteAction
+          lockRemoteAction(950);
+          pauseEnforceTimers.push(
+            setTimeout(() => {
+              if (localState === 'paused') pausePlayer();
+            }, 140),
+            setTimeout(() => {
+              if (localState === 'paused') pausePlayer();
+            }, 320)
+          );
         }
 
         updateTelemetryUI();
@@ -811,7 +871,7 @@
               time: initData.time,
               force: true
             });
-          }, 400);
+          }, 350);
         }
 
         // 1. Текущее время плеера
@@ -823,6 +883,15 @@
 
           localCurrentTime = newTime;
           lastTimeUpdateWallClock = now;
+
+          // Если время плавно идет вперед вне удаленной команды — плеер гарантированно в режиме воспроизведения
+          if (!isRemoteAction && elapsedWallSec > 0.05 && elapsedWallSec < 1.2) {
+            const forwardStep = newTime - prevTime;
+            if (forwardStep > 0.05 && forwardStep < 1.5 && localState !== 'playing') {
+              localState = 'playing';
+            }
+          }
+
           updateTelemetryUI();
 
           // Детектируем ручную перемотку ползунка пользователем внутри iframe
@@ -831,48 +900,55 @@
             const actualDelta = Math.abs(newTime - prevTime);
             const drift = Math.abs(actualDelta - expectedDelta);
 
-            if (drift >= 2.5) {
+            if (drift >= 2.2) {
               if (seekBroadcastTimer) clearTimeout(seekBroadcastTimer);
               seekBroadcastTimer = setTimeout(() => {
                 if (!isRemoteAction) {
-                  addLog(`Перемотка на ${formatTimecode(localCurrentTime)}`, 'info');
+                  const liveTime = getLiveCurrentTime();
+                  addLog(`Перемотка на ${formatTimecode(liveTime)}`, 'info');
                   sendNetworkMessage({
                     type: 'sync',
                     action: 'seek',
                     state: localState,
-                    time: localCurrentTime,
+                    time: liveTime,
                     embedUrl: currentEmbedUrl
                   });
                 }
-              }, 250);
+              }, 60);
             }
           }
           return;
         }
 
-        // 2. Смена статуса плеера (playing / paused)
-        if (message.type === 'player:changeState' && message.data && message.data.state) {
-          const newState = message.data.state;
-          if (newState !== 'playing' && newState !== 'paused') {
+        // 2. Смена статуса плеера (Rutube присылает 'playing' или 'pause' / 'paused' в player:changeState)
+        if (message.type === 'player:changeState' && message.data) {
+          const normalizedState = normalizePlayerState(message.data.state);
+          if (!normalizedState) {
             return;
           }
 
+          // Если переключение вызвано сетевой командой — игнорируем (защита от эхо-цикла)
           if (isRemoteAction) {
-            localState = newState;
+            localState = normalizedState;
             updateTelemetryUI();
             return;
           }
 
-          if (localState === newState) {
+          const now = Date.now();
+          // Защита от спама одинаковым событием в пределах 250 мс, но без блокировки реального нажатия Паузы/Play
+          if (normalizedState === lastBroadcastedState && now - lastStateBroadcastAt < 250) {
             return;
           }
 
-          localState = newState;
+          localState = normalizedState;
+          lastBroadcastedState = normalizedState;
+          lastStateBroadcastAt = now;
           updateTelemetryUI();
 
-          const tc = formatTimecode(localCurrentTime);
+          const syncTime = normalizedState === 'playing' ? getLiveCurrentTime() : localCurrentTime;
+          const tc = formatTimecode(syncTime);
           addLog(
-            newState === 'playing'
+            normalizedState === 'playing'
               ? `Вы включили воспроизведение на ${tc}`
               : `Вы поставили паузу на ${tc}`,
             'info'
@@ -882,7 +958,7 @@
             type: 'sync',
             action: 'state-change',
             state: localState,
-            time: localCurrentTime,
+            time: syncTime,
             embedUrl: currentEmbedUrl
           });
         }
@@ -988,7 +1064,7 @@
                 targetId: data.senderId,
                 peerCount: Math.max(activeRoomPeers.size, guestConnections.size),
                 embedUrl: currentEmbedUrl,
-                time: localCurrentTime,
+                time: getLiveCurrentTime(),
                 state: localState
               });
             }
@@ -1099,7 +1175,7 @@
               type: 'welcome',
               peerCount: Math.max(activeRoomPeers.size, guestConnections.size),
               embedUrl: currentEmbedUrl,
-              time: localCurrentTime,
+              time: getLiveCurrentTime(),
               state: localState
             }));
           });
@@ -1311,7 +1387,6 @@
                 }
               }, 25000);
 
-              // Если мы Гость — подключение к общему каналу комнаты установлено
               if (!isHost && !guestConnectedToRoom) {
                 markGuestConnected();
               }
@@ -1414,7 +1489,8 @@
           return;
         }
 
-        const tc = formatTimecode(localCurrentTime);
+        const liveTime = getLiveCurrentTime();
+        const tc = formatTimecode(liveTime);
         addLog(
           `Вы запустили принудительную синхронизацию всех ко времени ${tc} (${localState === 'playing' ? 'Играет' : 'Пауза'})`,
           'sync'
@@ -1424,7 +1500,7 @@
           type: 'sync',
           action: 'force-sync',
           state: localState,
-          time: localCurrentTime,
+          time: liveTime,
           embedUrl: currentEmbedUrl,
           force: true
         });
