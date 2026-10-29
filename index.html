@@ -220,6 +220,12 @@
       border-color: var(--accent);
     }
 
+    .sync-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
     /* Основная часть: Плеер 16:9 */
     .player-wrapper {
       position: relative;
@@ -369,7 +375,8 @@
         flex-direction: column;
       }
 
-      .top-actions {
+      .top-actions,
+      .sync-buttons {
         width: 100%;
       }
 
@@ -452,9 +459,14 @@
     <!-- Нижняя панель -->
     <footer class="bottom-panel">
       <div class="controls-row">
-        <button class="btn btn-sync" id="forceSyncBtn" type="button">
-          ⚡ Синхронизировать всех ко мне
-        </button>
+        <div class="sync-buttons">
+          <button class="btn btn-sync" id="forceSyncBtn" type="button">
+            ⚡ Синхронизировать всех ко мне
+          </button>
+          <button class="btn" id="pullSyncBtn" type="button" title="Подтянуть мой плеер к текущему времени комнаты">
+            🔄 Синхронизировать меня с комнатой
+          </button>
+        </div>
 
         <div class="player-telemetry">
           <span>Локальный плеер:</span>
@@ -523,6 +535,7 @@
       const playerIframe = document.getElementById('rutubePlayer');
       const playerPlaceholder = document.getElementById('playerPlaceholder');
       const forceSyncBtn = document.getElementById('forceSyncBtn');
+      const pullSyncBtn = document.getElementById('pullSyncBtn');
       const localStateLabel = document.getElementById('localStateLabel');
       const localTimeLabel = document.getElementById('localTimeLabel');
       const eventLog = document.getElementById('eventLog');
@@ -532,6 +545,7 @@
       let localState = 'paused';           // 'playing' | 'paused'
       let localCurrentTime = 0;            // Последнее полученное время от плеера в секундах
       let lastTimeUpdateWallClock = 0;     // Wall-clock время последнего события currentTime (Date.now())
+      let hasVideoStartedOnce = false;     // ВАЖНО: в Rutube нельзя вызывать setCurrentTime до первого запуска видео (иначе бесконечная загрузка)
       let isRemoteAction = false;          // Флаг защиты от эхо-цикла
       let remoteActionTimer = null;
       let seekBroadcastTimer = null;
@@ -544,7 +558,7 @@
       let isLocalBuffering = false;        // Идет ли сейчас подгрузка (buffering) локального плеера
       let bufferingStartedAt = 0;
       let consecutiveDriftCount = 0;       // Счетчик подряд идущих маяков с накопленным рассинхроном
-      let pendingInitSync = null;          // Состояние для применения после загрузки iframe
+      let pendingInitSync = null;          // Целевое состояние комнаты для применения сразу после первого Play в плеере
 
       // --- Идентификация клиента и комнаты ---
       function generateShortId(prefix) {
@@ -608,13 +622,24 @@
 
       // Вычисляет точное текущее время плеера с учетом миллисекунд, прошедших с последнего события currentTime
       function getLiveCurrentTime() {
-        if (localState === 'playing' && !isLocalBuffering && lastTimeUpdateWallClock > 0) {
+        if (localState === 'playing' && hasVideoStartedOnce && !isLocalBuffering && lastTimeUpdateWallClock > 0) {
           const elapsedSec = (Date.now() - lastTimeUpdateWallClock) / 1000;
           if (elapsedSec > 0 && elapsedSec < 1.2) {
             return localCurrentTime + elapsedSec;
           }
         }
         return localCurrentTime;
+      }
+
+      // Вычисляет актуальное время отложенной синхронизации с учетом прошедшего времени
+      function getPendingSyncLiveTime() {
+        if (!pendingInitSync) return 0;
+        const base = typeof pendingInitSync.time === 'number' ? pendingInitSync.time : 0;
+        if (pendingInitSync.state === 'playing' && pendingInitSync.receivedAt > 0) {
+          const elapsed = Math.max(0, (Date.now() - pendingInitSync.receivedAt) / 1000);
+          return base + elapsed;
+        }
+        return base;
       }
 
       // Нормализует названия статусов плеера Rutube ('pause' / 'paused' / 'stopped' -> 'paused', 'play' / 'playing' -> 'playing')
@@ -678,7 +703,11 @@
       }
 
       function updateTelemetryUI() {
-        if (isLocalBuffering) {
+        if (!currentEmbedUrl) {
+          localStateLabel.textContent = 'Ожидание';
+        } else if (!hasVideoStartedOnce && pendingInitSync && (pendingInitSync.time > 1 || pendingInitSync.state === 'playing')) {
+          localStateLabel.textContent = '▶ Нажмите Play в плеере';
+        } else if (isLocalBuffering) {
           localStateLabel.textContent = '⏳ Подгрузка';
         } else {
           localStateLabel.textContent = localState === 'playing' ? '▶ Играет' : '⏸ Пауза';
@@ -771,6 +800,9 @@
       }
 
       function seekPlayer(seconds) {
+        // НИКОГДА не отправляем player:setCurrentTime в iframe Rutube до того, как плеер впервые запустил воспроизведение!
+        // Вызов setCurrentTime на стартовом экране Rutube ломает его HLS-загрузчик и вешает бесконечный спиннер.
+        if (!hasVideoStartedOnce) return;
         const target = Math.max(0, Number(seconds) || 0);
         sendCommandToPlayer('player:setCurrentTime', { time: target });
       }
@@ -782,34 +814,73 @@
 
         clearSenderHoldTimer();
         clearPauseEnforceTimers();
-        lockRemoteAction(900);
+        lockRemoteAction(600);
+
+        const isSameUrl = currentEmbedUrl === embedUrl && playerIframe.src === embedUrl;
         currentEmbedUrl = embedUrl;
-        localCurrentTime = initialTime || 0;
-        localState = normalizePlayerState(initialState) || 'paused';
-        lastTimeUpdateWallClock = 0;
-        hadRemotePauseSeek = false;
-        isLocalBuffering = false;
-        consecutiveDriftCount = 0;
 
-        playerPlaceholder.classList.add('hidden');
-        if (playerIframe.src !== embedUrl) {
+        const targetState = normalizePlayerState(initialState) || 'paused';
+        const targetTime = typeof initialTime === 'number' && !isNaN(initialTime) ? initialTime : 0;
+
+        if (!isSameUrl) {
+          hasVideoStartedOnce = false;
+          localCurrentTime = 0;
+          localState = 'paused';
+          lastTimeUpdateWallClock = 0;
+          hadRemotePauseSeek = false;
+          isLocalBuffering = false;
+          consecutiveDriftCount = 0;
+
+          playerPlaceholder.classList.add('hidden');
           playerIframe.src = embedUrl;
+          videoUrlInput.value = embedUrl;
         }
-        videoUrlInput.value = embedUrl;
-        updateTelemetryUI();
 
-        if (initialTime > 0 || localState === 'playing') {
-          pendingInitSync = { time: initialTime, state: localState };
+        if (!hasVideoStartedOnce && (targetTime > 0.5 || targetState === 'playing')) {
+          pendingInitSync = {
+            time: targetTime,
+            state: targetState,
+            receivedAt: Date.now()
+          };
+          updateTelemetryUI();
+          addLog(
+            `Видео загружено (${formatTimecode(targetTime)}). Нажмите Play на плеере, чтобы подключиться к просмотру!`,
+            'sync'
+          );
         } else {
           pendingInitSync = null;
+          updateTelemetryUI();
+          addLog(
+            isRemote
+              ? `Загружено видео по сети: ${embedUrl}`
+              : `Видео загружено для всех: ${embedUrl}`,
+            'sync'
+          );
         }
+      }
 
-        addLog(
-          isRemote
-            ? `Загружено видео по сети: ${embedUrl}`
-            : `Видео загружено для всех: ${embedUrl}`,
-          'sync'
-        );
+      // Вызывается в момент, когда пользователь впервые запустил плеер Rutube (разблокировал автоплей и инициализировал HLS)
+      function applyPendingInitSyncOnFirstPlay() {
+        if (!pendingInitSync) return;
+        const syncState = pendingInitSync.state || 'playing';
+        const syncTime = getPendingSyncLiveTime();
+        pendingInitSync = null;
+
+        // Даем 250 мс декодеру Rutube завершить инициализацию первого кадра, затем перематываем к комнате
+        lockRemoteAction(1200);
+        setTimeout(() => {
+          applyRemoteSyncCommand({
+            action: 'force-sync',
+            state: syncState,
+            time: syncTime,
+            force: true
+          });
+          // Дополнительно запрашиваем свежий маяк у комнаты для идеальной точности
+          sendNetworkMessage({
+            type: 'request-beacon',
+            embedUrl: currentEmbedUrl
+          });
+        }, 250);
       }
 
       // --- Применение входящей команды синхронизации ---
@@ -823,6 +894,24 @@
             initialTime: typeof time === 'number' ? time : 0,
             initialState: state || 'paused'
           });
+          return;
+        }
+
+        // Если наш плеер еще ни разу не был запущен (например, после F5 обновления страницы),
+        // НЕ отправляем в него setCurrentTime (чтобы не повесить бесконечную загрузку Rutube!),
+        // а сохраняем актуальный таймкод и статус комнаты до клика по кнопке Play в плеере.
+        if (!hasVideoStartedOnce) {
+          pendingInitSync = {
+            time: typeof time === 'number' ? time : 0,
+            state: state || 'paused',
+            receivedAt: Date.now()
+          };
+          // Если в комнате нажали Play на самом старте ролика (00:00) — пробуем мягкий playPlayer() без seekPlayer()
+          if (state === 'playing' && (!time || time < 1.5)) {
+            lockRemoteAction(600);
+            playPlayer();
+          }
+          updateTelemetryUI();
           return;
         }
 
@@ -840,7 +929,6 @@
           if (typeof time === 'number' && !isNaN(time)) {
             const diff = Math.abs(time - localCurrentTime);
             // Перематываем на паузе если нажата кнопка force-sync ИЛИ расхождение >= 0.35 сек.
-            // Если расхождение меньше 0.35 сек — не вызываем seekPlayer, чтобы не сбрасывать теплый буфер!
             if (action === 'force-sync' || diff >= PAUSE_SYNC_THRESHOLD) {
               seekPlayer(time);
               localCurrentTime = time;
@@ -851,7 +939,7 @@
           }
 
           if (didPauseSeek) {
-            // Даем плееру 120 мс подгрузить кадр после seek, затем фиксируем паузу (чтобы буфер остался теплым)
+            // Даем плееру 110 мс подгрузить кадр после seek, затем фиксируем паузу
             lockRemoteAction(1050);
             pauseEnforceTimers.push(
               setTimeout(() => {
@@ -889,8 +977,6 @@
             }
           }
 
-          // Если Play нажал тот пир, который до этого получил удаленную паузу с перемоткой (senderHadColdPause),
-          // его плеер стартует на ~220 мс дольше нашего теплого буфера — поэтому запускаем наш плеер через 220 мс
           if (!didSeek && senderHadColdPause) {
             lockRemoteAction(650);
             setTimeout(() => {
@@ -928,17 +1014,42 @@
       // --- Авто-коррекция рассинхрона по маяку времени (после подгрузки или накопления задержки) ---
       function handleIncomingTimeBeacon(payload) {
         if (!currentEmbedUrl || payload.embedUrl !== currentEmbedUrl) return;
-        if (localState !== 'playing' || payload.state !== 'playing') return;
-        if (isRemoteAction || isLocalBuffering || senderHoldTimer) return;
-        if (Date.now() - lastManualSyncAt < 2500) return;
 
+        const beaconState = normalizePlayerState(payload.state) || 'playing';
         const remoteTime = payload.time;
         if (typeof remoteTime !== 'number' || isNaN(remoteTime)) return;
+
+        // Если наш плеер еще не запущен пользователем после входа/обновления страницы —
+        // просто обновляем целевую точку синхронизации в памяти, НЕ дергая setCurrentTime!
+        if (!hasVideoStartedOnce) {
+          pendingInitSync = {
+            time: remoteTime,
+            state: beaconState,
+            receivedAt: Date.now()
+          };
+          updateTelemetryUI();
+          return;
+        }
+
+        // Если мы сами запросили принудительное выравнивание с комнатой (urgent) и в комнате стоит пауза
+        if (payload.urgent && beaconState === 'paused') {
+          applyRemoteSyncCommand({
+            action: 'force-sync',
+            state: 'paused',
+            time: remoteTime,
+            force: true
+          });
+          return;
+        }
+
+        if (localState !== 'playing' || beaconState !== 'playing') return;
+        if (isRemoteAction || isLocalBuffering || senderHoldTimer) return;
+        if (Date.now() - lastManualSyncAt < 2500 && !payload.urgent) return;
 
         const myLiveTime = getLiveCurrentTime();
         const drift = Math.abs(remoteTime - myLiveTime);
 
-        // 1. Если это срочный ответ после подгрузки буфера (urgent) и мы отстали >= 0.7 сек — сразу догоняем
+        // 1. Если это срочный ответ после подгрузки буфера или кнопки "Синхронизировать меня"
         if (payload.urgent && drift >= BUFFER_RECOVERY_DIFF) {
           consecutiveDriftCount = 0;
           const targetTime = remoteTime + PLAY_SEEK_LEAD_SEC;
@@ -948,7 +1059,7 @@
           localCurrentTime = targetTime;
           lastTimeUpdateWallClock = Date.now();
           updateTelemetryUI();
-          addLog(`Догон таймкода после подгрузки буфера (${formatTimecode(targetTime)})`, 'sync');
+          addLog(`Догон таймкода комнаты (${formatTimecode(targetTime)})`, 'sync');
           return;
         }
 
@@ -984,24 +1095,6 @@
 
         if (!message || typeof message.type !== 'string') return;
 
-        if (
-          pendingInitSync &&
-          (message.type === 'player:ready' ||
-            message.type === 'player:durationChange' ||
-            message.type === 'player:currentTime')
-        ) {
-          const initData = pendingInitSync;
-          pendingInitSync = null;
-          setTimeout(() => {
-            applyRemoteSyncCommand({
-              action: 'force-sync',
-              state: initData.state,
-              time: initData.time,
-              force: true
-            });
-          }, 350);
-        }
-
         // 1. Текущее время плеера
         if (message.type === 'player:currentTime' && message.data && typeof message.data.time === 'number') {
           const newTime = message.data.time;
@@ -1012,8 +1105,18 @@
           localCurrentTime = newTime;
           lastTimeUpdateWallClock = now;
 
+          // Если плеер впервые пошел вперед (newTime > 0.1) — отмечаем, что видео инициализировано
+          if (!hasVideoStartedOnce && newTime > 0.1) {
+            hasVideoStartedOnce = true;
+            localState = 'playing';
+            if (pendingInitSync) {
+              applyPendingInitSyncOnFirstPlay();
+              return;
+            }
+          }
+
           // Если время плавно идет вперед вне удаленной команды — плеер в режиме воспроизведения
-          if (!isRemoteAction && elapsedWallSec > 0.05 && elapsedWallSec < 1.2) {
+          if (hasVideoStartedOnce && !isRemoteAction && elapsedWallSec > 0.05 && elapsedWallSec < 1.2) {
             const forwardStep = newTime - prevTime;
             if (forwardStep > 0.05 && forwardStep < 1.5) {
               if (localState !== 'playing') {
@@ -1021,7 +1124,6 @@
               }
               if (isLocalBuffering) {
                 isLocalBuffering = false;
-                // Запрашиваем у комнаты актуальный маяк времени после завершения подгрузки
                 sendNetworkMessage({
                   type: 'request-beacon',
                   embedUrl: currentEmbedUrl
@@ -1033,7 +1135,7 @@
           updateTelemetryUI();
 
           // Детектируем ручную перемотку ползунка пользователем внутри iframe
-          if (!isRemoteAction && elapsedWallSec > 0 && elapsedWallSec < 5) {
+          if (hasVideoStartedOnce && !isRemoteAction && elapsedWallSec > 0 && elapsedWallSec < 5) {
             const expectedDelta = localState === 'playing' ? elapsedWallSec : 0;
             const actualDelta = Math.abs(newTime - prevTime);
             const drift = Math.abs(actualDelta - expectedDelta);
@@ -1064,9 +1166,9 @@
         if (message.type === 'player:changeState' && message.data) {
           const rawState = String(message.data.state || '').trim().toLowerCase();
 
-          // Отслеживаем начало подгрузки (buffering) у пользователя во время игры
+          // Отслеживаем начало подгрузки (buffering) ТОЛЬКО если видео уже реально запускалось
           if (rawState === 'buffering' || rawState === 'seeking') {
-            if (!isRemoteAction && localState === 'playing' && !isLocalBuffering) {
+            if (hasVideoStartedOnce && !isRemoteAction && localState === 'playing' && !isLocalBuffering) {
               isLocalBuffering = true;
               bufferingStartedAt = Date.now();
               updateTelemetryUI();
@@ -1077,6 +1179,25 @@
           const normalizedState = normalizePlayerState(rawState);
           if (!normalizedState) {
             return;
+          }
+
+          // ПЕРВЫЙ ЗАПУСК ПЛЕЕРА ПОЛЬЗОВАТЕЛЕМ (например, клик по Play после входа или обновления страницы F5)
+          if (!hasVideoStartedOnce) {
+            if (normalizedState === 'playing') {
+              hasVideoStartedOnce = true;
+              localState = 'playing';
+              updateTelemetryUI();
+
+              // Если в комнате уже идет просмотр (есть отложенная синхронизация) —
+              // НЕ рассылаем наш 00:00 в комнату, а сразу перематываем себя к таймкоду комнаты!
+              if (pendingInitSync) {
+                applyPendingInitSyncOnFirstPlay();
+                return;
+              }
+            } else {
+              // Пока видео ни разу не стартовало, игнорируем стартовые события pause/stopped от iframe
+              return;
+            }
           }
 
           // Если плеер только что вышел из подгрузки буфера (buffering -> playing) —
@@ -1131,9 +1252,6 @@
 
           if (normalizedState === 'playing') {
             addLog(`Вы включили воспроизведение на ${tc}`, 'info');
-            // Если мы сами ставили паузу (буфер теплый) — придерживаем старт на 400 мс, чтобы пиры успели получить пакет.
-            // Если же паузу ставил другой человек и у нас был pause-seek (wasColdPause) — наш плеер сам тратит ~200 мс на старт,
-            // поэтому придерживаем всего на 160 мс, а теплый плеер друга подождет нас 220 мс.
             if (activeRoomPeers.size > 0 || guestConnections.size > 0 || !isHost) {
               const holdDuration = wasColdPause ? 160 : SENDER_START_HOLD_MS;
               holdLocalPlayerForCoordinatedStart(holdDuration);
@@ -1246,7 +1364,7 @@
           }
 
           if (data.action === 'join' || data.action === 'request-state') {
-            if (isHost || currentEmbedUrl) {
+            if (isHost || (currentEmbedUrl && hasVideoStartedOnce)) {
               sendNetworkMessage({
                 type: 'welcome',
                 targetId: data.senderId,
@@ -1260,15 +1378,14 @@
           return;
         }
 
-        // Если у кого-то завершилась подгрузка буфера (request-beacon) —
-        // активно играющий участник сразу отправляет точный маяк времени для догона
+        // Запрос маяка времени (после подгрузки буфера или кнопки "Синхронизировать меня с комнатой")
         if (data.type === 'request-beacon') {
-          if (currentEmbedUrl && localState === 'playing' && !isLocalBuffering && !isRemoteAction) {
+          if (currentEmbedUrl && (isHost || hasVideoStartedOnce) && !isLocalBuffering && !isRemoteAction) {
             sendNetworkMessage({
               type: 'time-beacon',
               embedUrl: currentEmbedUrl,
               time: getLiveCurrentTime(),
-              state: 'playing',
+              state: localState,
               urgent: true
             });
           }
@@ -1287,12 +1404,21 @@
           if (typeof data.peerCount === 'number') {
             peerCountEl.textContent = String(Math.max(data.peerCount, activeRoomPeers.size));
           }
-          if (data.embedUrl && data.embedUrl !== currentEmbedUrl) {
-            loadEmbedVideo(data.embedUrl, {
-              isRemote: true,
-              initialTime: data.time || 0,
-              initialState: data.state || 'paused'
-            });
+          if (data.embedUrl) {
+            if (data.embedUrl !== currentEmbedUrl) {
+              loadEmbedVideo(data.embedUrl, {
+                isRemote: true,
+                initialTime: data.time || 0,
+                initialState: data.state || 'paused'
+              });
+            } else if (!hasVideoStartedOnce && (data.time > 0.5 || data.state === 'playing')) {
+              pendingInitSync = {
+                time: data.time || 0,
+                state: normalizePlayerState(data.state) || 'paused',
+                receivedAt: Date.now()
+              };
+              updateTelemetryUI();
+            }
           }
           return;
         }
@@ -1353,6 +1479,7 @@
           if (
             isHost &&
             currentEmbedUrl &&
+            hasVideoStartedOnce &&
             localState === 'playing' &&
             !isLocalBuffering &&
             !isRemoteAction &&
@@ -1719,6 +1846,13 @@
           return;
         }
 
+        // Если наш плеер еще не был запущен (висит на 00:00 после входа/F5) —
+        // вместо сброса всей комнаты в 00:00 запрашиваем синхронизацию у комнаты
+        if (!hasVideoStartedOnce && pendingInitSync) {
+          addLog('Сначала нажмите кнопку Play внутри самого плеера Rutube, чтобы разблокировать воспроизведение', 'warn');
+          return;
+        }
+
         lastManualSyncAt = Date.now();
         const liveTime = getLiveCurrentTime();
         const tc = formatTimecode(liveTime);
@@ -1736,11 +1870,25 @@
           force: true
         });
 
-        // Если принудительная синхронизация вызвана во время воспроизведения —
-        // придерживаем свой плеер на 450 мс, пока остальные перематывают буфер
         if (localState === 'playing') {
           holdLocalPlayerForCoordinatedStart(450);
         }
+      });
+
+      pullSyncBtn.addEventListener('click', () => {
+        if (!currentEmbedUrl) {
+          addLog('Видео в комнате ещё не выбрано', 'warn');
+          return;
+        }
+        if (!hasVideoStartedOnce) {
+          addLog('Нажмите кнопку Play в центре плеера Rutube — видео сразу перемотается к таймкоду комнаты!', 'warn');
+          return;
+        }
+        addLog('Запрос текущего таймкода у комнаты...', 'info');
+        sendNetworkMessage({
+          type: 'request-beacon',
+          embedUrl: currentEmbedUrl
+        });
       });
 
       // Запуск приложения
