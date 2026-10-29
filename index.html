@@ -132,6 +132,13 @@
       background: var(--danger);
     }
 
+    .top-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
     .url-bar {
       display: flex;
       gap: 10px;
@@ -362,6 +369,10 @@
         flex-direction: column;
       }
 
+      .top-actions {
+        width: 100%;
+      }
+
       .controls-row {
         flex-direction: column;
         align-items: stretch;
@@ -395,9 +406,14 @@
           </div>
         </div>
 
-        <button class="btn" id="copyRoomBtn" type="button" disabled>
-          📋 Скопировать ссылку на комнату
-        </button>
+        <div class="top-actions">
+          <button class="btn" id="copyRoomBtn" type="button">
+            📋 Скопировать ссылку на комнату
+          </button>
+          <button class="btn" id="newRoomBtn" type="button" title="Создать новую комнату как Хост">
+            ➕ Новая комната
+          </button>
+        </div>
       </div>
 
       <div class="url-bar">
@@ -459,11 +475,44 @@
       const SYNC_THRESHOLD_SEC = 2.0;      // Порог рассинхрона: не перематывать если разница < 2 сек
       const REMOTE_LOCK_MS = 750;          // Блокировка обратной связи (feedback loop) 500-800 мс
 
+      // Конфигурация STUN + TURN серверов для обхода NAT и VPN в WebRTC (PeerJS)
+      const PEERJS_CONFIG = {
+        debug: 0,
+        config: {
+          iceCandidatePoolSize: 10,
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun.cloudflare.com:3478' },
+            {
+              urls: [
+                'turn:openrelay.metered.ca:80',
+                'turn:openrelay.metered.ca:443',
+                'turn:openrelay.metered.ca:443?transport=tcp',
+                'turns:openrelay.metered.ca:443?transport=tcp'
+              ],
+              username: 'openrelayproject',
+              credential: 'openrelayproject'
+            }
+          ]
+        }
+      };
+
+      // Параллельный пул WSS-брокеров (MQTT over WebSockets на портах 443/8084/8884),
+      // обеспечивающий мгновенную доставку команд даже если VPN блокирует WebRTC/UDP
+      const WSS_BROKERS = [
+        'wss://mqtt.eclipseprojects.io:443/mqtt',
+        'wss://broker.emqx.io:8084/mqtt',
+        'wss://broker.hivemq.com:8884/mqtt'
+      ];
+
       // --- DOM элементы ---
       const statusDot = document.getElementById('statusDot');
       const statusText = document.getElementById('statusText');
       const peerCountEl = document.getElementById('peerCount');
       const copyRoomBtn = document.getElementById('copyRoomBtn');
+      const newRoomBtn = document.getElementById('newRoomBtn');
       const videoUrlInput = document.getElementById('videoUrlInput');
       const loadVideoBtn = document.getElementById('loadVideoBtn');
       const playerIframe = document.getElementById('rutubePlayer');
@@ -483,15 +532,56 @@
       let seekBroadcastTimer = null;
       let pendingInitSync = null;          // Состояние для применения после загрузки iframe
 
-      // --- Состояние сети (PeerJS) ---
-      const urlParams = new URLSearchParams(window.location.search);
-      const roomParam = urlParams.get('room');
-      const isHost = !roomParam;
-      let peer = null;
-      let hostConnection = null;           // Для гостя: соединение с Хостом
-      const guestConnections = new Map();  // Для Хоста: peerId -> DataConnection
+      // --- Идентификация клиента и комнаты ---
+      function generateShortId(prefix) {
+        const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+        let id = prefix ? `${prefix}-` : '';
+        for (let i = 0; i < 8; i++) {
+          id += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return id;
+      }
 
-      // --- Логирование ---
+      let myClientId = sessionStorage.getItem('wp_client_id');
+      if (!myClientId) {
+        myClientId = generateShortId('u');
+        sessionStorage.setItem('wp_client_id', myClientId);
+      }
+
+      const urlParams = new URLSearchParams(window.location.search);
+      let roomId = urlParams.get('room');
+      const savedHostRoom = sessionStorage.getItem('wp_host_room');
+
+      // Если открыли без ?room= или обновили вкладку Хоста — остаемся Хостом этой комнаты
+      let isHost = false;
+      if (!roomId) {
+        roomId = generateShortId('wp');
+        sessionStorage.setItem('wp_host_room', roomId);
+        isHost = true;
+        const newUrl = `${window.location.pathname}?room=${encodeURIComponent(roomId)}`;
+        window.history.replaceState(null, '', newUrl);
+      } else if (savedHostRoom === roomId) {
+        isHost = true;
+      }
+
+      // --- Состояние сети (PeerJS + параллельный пул WSS) ---
+      let peer = null;
+      let hostConnection = null;           // Для гостя: WebRTC соединение с Хостом
+      const guestConnections = new Map();  // Для Хоста: peerId -> DataConnection
+      const activeRoomPeers = new Map();   // clientId -> timestamp последней активности
+      const seenMessageIds = new Set();    // Дедупликация пакетов между WebRTC и WSS
+      let msgSeq = 0;
+      let guestConnectedToRoom = false;
+      let peerRetryTimer = null;
+      let peerRetryCount = 0;
+
+      // Состояние параллельного пула WSS Relay
+      const wssPool = new Map();           // brokerUrl -> { socket, connected, pingTimer }
+      const roomTopic = `rutube-watch-party/v2/${roomId}`;
+      const textEncoder = new TextEncoder();
+      const textDecoder = new TextDecoder();
+
+      // --- Логирование и UI ---
       function formatTimecode(seconds) {
         if (typeof seconds !== 'number' || isNaN(seconds) || seconds < 0) return '00:00';
         const total = Math.floor(seconds);
@@ -535,8 +625,22 @@
         if (mode === 'error') statusDot.classList.add('error');
       }
 
-      function updatePeerCount(count) {
-        peerCountEl.textContent = String(count);
+      function refreshPeerCountUI() {
+        const now = Date.now();
+        activeRoomPeers.forEach((lastSeen, cid) => {
+          if (now - lastSeen > 30000) {
+            activeRoomPeers.delete(cid);
+          }
+        });
+        const total = Math.max(activeRoomPeers.size, guestConnections.size);
+        peerCountEl.textContent = String(total);
+      }
+
+      function hasAnyOpenWss() {
+        for (const item of wssPool.values()) {
+          if (item.connected) return true;
+        }
+        return false;
       }
 
       // --- Защита от эхо-цикла (feedback loop) ---
@@ -555,11 +659,6 @@
         if (!rawInput) return null;
         const input = rawInput.trim();
 
-        // Регулярное выражение для ссылок вида:
-        // https://rutube.ru/video/c6582a09.../
-        // https://rutube.ru/video/private/c6582a09.../?p=...
-        // https://rutube.ru/play/embed/c6582a09...
-        // https://rutube.ru/shorts/c6582a09.../
         const regex = /rutube\.ru\/(?:video\/(?:private\/)?|play\/embed\/|shorts\/)([a-zA-Z0-9_-]{16,64})/i;
         const match = input.match(regex);
 
@@ -572,7 +671,6 @@
             privateKey = parsedUrl.searchParams.get('p');
           }
         } catch (_) {
-          // Если вставили просто 32-символьный ID видео без домена
           if (!videoId && /^[a-f0-9]{32}$/i.test(input)) {
             videoId = input;
           }
@@ -643,7 +741,6 @@
       function applyRemoteSyncCommand(payload) {
         const { action, state, time, embedUrl, force = false } = payload;
 
-        // Если у пира загружено другое видео — подгружаем его
         if (embedUrl && embedUrl !== currentEmbedUrl) {
           loadEmbedVideo(embedUrl, {
             isRemote: true,
@@ -655,7 +752,6 @@
 
         lockRemoteAction(REMOTE_LOCK_MS);
 
-        // Сверка времени с учетом порога рассинхрона 2 секунды (либо принудительно)
         if (typeof time === 'number' && !isNaN(time)) {
           const diff = Math.abs(time - localCurrentTime);
           if (force || diff >= SYNC_THRESHOLD_SEC) {
@@ -665,7 +761,6 @@
           }
         }
 
-        // Применение статуса воспроизведения
         if (state === 'playing') {
           localState = 'playing';
           playPlayer();
@@ -701,7 +796,6 @@
 
         if (!message || typeof message.type !== 'string') return;
 
-        // Если плеер только загрузился и есть отложенная синхронизация (например, гость вошел в активную комнату)
         if (
           pendingInitSync &&
           (message.type === 'player:ready' ||
@@ -763,14 +857,12 @@
             return;
           }
 
-          // Если переключение вызвано сетевой командой — игнорируем (защита от эхо-цикла)
           if (isRemoteAction) {
             localState = newState;
             updateTelemetryUI();
             return;
           }
 
-          // Игнорируем дублирующиеся события того же статуса
           if (localState === newState) {
             return;
           }
@@ -796,44 +888,127 @@
         }
       });
 
-      // --- P2P Сеть (PeerJS) ---
-      function broadcastFromHost(data, excludePeerId = null) {
+      // =========================================================================
+      // СЕТЬ: Гибридный транспорт PeerJS (WebRTC DataChannel) + Пул WSS Relay
+      // =========================================================================
+
+      function stampMessage(data) {
+        if (!data.msgId) {
+          data.msgId = `${myClientId}-${++msgSeq}-${Date.now()}`;
+        }
+        if (!data.senderId) {
+          data.senderId = myClientId;
+        }
+        return data;
+      }
+
+      function broadcastFromHostWebRTC(data, excludePeerId = null) {
         guestConnections.forEach((conn, peerId) => {
           if (peerId !== excludePeerId && conn.open) {
-            conn.send(data);
+            try {
+              conn.send(data);
+            } catch (_) {}
           }
         });
       }
 
-      function sendNetworkMessage(data) {
+      function sendNetworkMessage(rawPayload) {
+        const data = stampMessage({ ...rawPayload });
+        seenMessageIds.add(data.msgId);
+
+        // 1. Отправка через PeerJS WebRTC DataChannel
         if (isHost) {
-          broadcastFromHost(data);
+          broadcastFromHostWebRTC(data);
         } else if (hostConnection && hostConnection.open) {
-          hostConnection.send(data);
+          try {
+            hostConnection.send(data);
+          } catch (_) {}
+        }
+
+        // 2. Параллельная отправка во все открытые WSS-брокеры (гарантия прохождения через любые VPN)
+        publishWssMessage(data);
+      }
+
+      function markGuestConnected() {
+        if (!guestConnectedToRoom) {
+          guestConnectedToRoom = true;
+          setConnectionStatus('Подключено к комнате', 'online');
+          addLog('Успешно подключено к комнате!', 'peer');
         }
       }
 
-      function broadcastRoomCount() {
-        if (!isHost) return;
-        const count = guestConnections.size;
-        updatePeerCount(count);
-        broadcastFromHost({
-          type: 'room-info',
-          peerCount: count
-        });
-      }
-
-      function handleIncomingData(data, senderPeerId = null) {
+      function handleIncomingData(data, webrtcSenderPeerId = null) {
         if (!data || typeof data.type !== 'string') return;
+        if (data.senderId === myClientId) return;
 
-        // Если мы Хост — ретранслируем синхронизационные сообщения от одного гостя всем остальным гостям
-        if (isHost && (data.type === 'sync' || data.type === 'load-video')) {
-          broadcastFromHost(data, senderPeerId);
+        // Дедупликация сообщений между WebRTC и WSS-пулом
+        if (data.msgId) {
+          if (seenMessageIds.has(data.msgId)) return;
+          seenMessageIds.add(data.msgId);
+          if (seenMessageIds.size > 800) {
+            const firstKey = seenMessageIds.values().next().value;
+            seenMessageIds.delete(firstKey);
+          }
         }
 
-        if (data.type === 'room-info') {
+        // Отслеживание присутствия участников
+        if (data.senderId) {
+          const isNewPeer = !activeRoomPeers.has(data.senderId);
+          activeRoomPeers.set(data.senderId, Date.now());
+          refreshPeerCountUI();
+
+          if (isNewPeer) {
+            addLog(`Друг подключился (${data.senderId.slice(0, 6)})`, 'peer');
+          }
+        }
+
+        // Если мы Гость и получили любое сообщение от комнаты — значит связь с комнатой установлена
+        if (!isHost && !guestConnectedToRoom) {
+          markGuestConnected();
+        }
+
+        // Ретрансляция Хостом по WebRTC другим гостям
+        if (isHost && webrtcSenderPeerId && (data.type === 'sync' || data.type === 'load-video')) {
+          broadcastFromHostWebRTC(data, webrtcSenderPeerId);
+        }
+
+        // Обработка присутствия и рукопожатия комнаты
+        if (data.type === 'presence') {
+          if (data.action === 'leave' && data.senderId) {
+            activeRoomPeers.delete(data.senderId);
+            refreshPeerCountUI();
+            addLog(`Друг отключился (${data.senderId.slice(0, 6)})`, 'warn');
+            return;
+          }
+
+          if (data.action === 'join' || data.action === 'request-state') {
+            if (isHost || currentEmbedUrl) {
+              sendNetworkMessage({
+                type: 'welcome',
+                targetId: data.senderId,
+                peerCount: Math.max(activeRoomPeers.size, guestConnections.size),
+                embedUrl: currentEmbedUrl,
+                time: localCurrentTime,
+                state: localState
+              });
+            }
+          }
+          return;
+        }
+
+        if (data.type === 'welcome') {
+          if (!isHost) {
+            markGuestConnected();
+          }
           if (typeof data.peerCount === 'number') {
-            updatePeerCount(data.peerCount);
+            peerCountEl.textContent = String(Math.max(data.peerCount, activeRoomPeers.size));
+          }
+          if (data.embedUrl && data.embedUrl !== currentEmbedUrl) {
+            loadEmbedVideo(data.embedUrl, {
+              isRemote: true,
+              initialTime: data.time || 0,
+              initialState: data.state || 'paused'
+            });
           }
           return;
         }
@@ -852,45 +1027,81 @@
         }
       }
 
+      // --- 1. Инициализация PeerJS (WebRTC) + WSS пула ---
       function initPeerNetwork() {
-        setConnectionStatus('Ожидание...', 'waiting');
-        addLog('Инициализация P2P-соединения (PeerJS)...', 'info');
+        if (isHost) {
+          setConnectionStatus('Хост', 'online');
+          addLog(`Комната создана (${roomId}). Вы — Хост.`, 'peer');
+        } else {
+          setConnectionStatus('Подключение...', 'waiting');
+          addLog(`Подключение к комнате ${roomId}...`, 'info');
+        }
 
-        peer = new Peer();
+        startPeerInstance();
+        initWssPool();
 
-        peer.on('open', (myId) => {
-          copyRoomBtn.disabled = false;
+        // Быстрый повтор рукопожатия для Гостя, пока он не получит ответ от комнаты
+        const joinHandshakeInterval = setInterval(() => {
+          if (isHost || guestConnectedToRoom) {
+            clearInterval(joinHandshakeInterval);
+            return;
+          }
+          sendNetworkMessage({
+            type: 'presence',
+            action: 'join',
+            role: 'guest'
+          });
+        }, 2200);
 
+        // Периодический heartbeat присутствия
+        setInterval(() => {
+          sendNetworkMessage({
+            type: 'presence',
+            action: 'heartbeat',
+            role: isHost ? 'host' : 'guest'
+          });
+          refreshPeerCountUI();
+        }, 8000);
+
+        window.addEventListener('beforeunload', () => {
+          sendNetworkMessage({
+            type: 'presence',
+            action: 'leave'
+          });
+        });
+      }
+
+      function startPeerInstance() {
+        if (peer) {
+          try {
+            peer.destroy();
+          } catch (_) {}
+        }
+
+        peer = isHost ? new Peer(roomId, PEERJS_CONFIG) : new Peer(undefined, PEERJS_CONFIG);
+
+        peer.on('open', () => {
           if (isHost) {
-            // Вшиваем Peer ID Хоста в URL через ?room=ID
-            const newUrl = `${window.location.pathname}?room=${encodeURIComponent(myId)}`;
-            window.history.replaceState(null, '', newUrl);
             setConnectionStatus('Хост', 'online');
-            addLog(`Комната создана. Вы — Хост (ID: ${myId.slice(0, 8)}...)`, 'peer');
           } else {
-            setConnectionStatus('Ожидание...', 'waiting');
-            connectToHost(roomParam);
+            connectToHostWebRTC(roomId);
           }
         });
 
-        // Только для Хоста: прием входящих подключений от друзей
         peer.on('connection', (conn) => {
           if (!isHost) return;
 
           conn.on('open', () => {
             guestConnections.set(conn.peer, conn);
-            addLog(`Друг подключился (${conn.peer.slice(0, 8)}...)`, 'peer');
-            broadcastRoomCount();
+            refreshPeerCountUI();
 
-            // Отправляем новому участнику текущее видео и таймкод комнаты
-            if (currentEmbedUrl) {
-              conn.send({
-                type: 'load-video',
-                embedUrl: currentEmbedUrl,
-                time: localCurrentTime,
-                state: localState
-              });
-            }
+            conn.send(stampMessage({
+              type: 'welcome',
+              peerCount: Math.max(activeRoomPeers.size, guestConnections.size),
+              embedUrl: currentEmbedUrl,
+              time: localCurrentTime,
+              state: localState
+            }));
           });
 
           conn.on('data', (data) => {
@@ -899,29 +1110,63 @@
 
           conn.on('close', () => {
             guestConnections.delete(conn.peer);
-            addLog(`Друг отключился (${conn.peer.slice(0, 8)}...)`, 'warn');
-            broadcastRoomCount();
+            refreshPeerCountUI();
           });
 
           conn.on('error', () => {
             guestConnections.delete(conn.peer);
-            broadcastRoomCount();
+            refreshPeerCountUI();
           });
         });
 
+        peer.on('disconnected', () => {
+          if (peer && !peer.destroyed) {
+            try {
+              peer.reconnect();
+            } catch (_) {}
+          }
+        });
+
         peer.on('error', (err) => {
-          setConnectionStatus('Ошибка сети', 'error');
-          addLog(`Ошибка PeerJS: ${err.type || err.message}`, 'warn');
+          const errType = err && err.type ? err.type : '';
+
+          if (isHost && errType === 'unavailable-id') {
+            setTimeout(() => startPeerInstance(), 2500);
+            return;
+          }
+
+          if (!isHost && (errType === 'peer-unavailable' || errType === 'network' || errType === 'webrtc')) {
+            if (!guestConnectedToRoom && peerRetryCount < 6) {
+              peerRetryCount++;
+              clearTimeout(peerRetryTimer);
+              peerRetryTimer = setTimeout(() => connectToHostWebRTC(roomId), 3000);
+            }
+            return;
+          }
         });
       }
 
-      function connectToHost(hostId) {
-        addLog(`Подключение к комнате Хоста (${hostId.slice(0, 8)}...)...`, 'info');
-        hostConnection = peer.connect(hostId, { reliable: true });
+      function connectToHostWebRTC(targetRoomId) {
+        if (!peer || peer.destroyed || !peer.open) return;
+
+        try {
+          hostConnection = peer.connect(targetRoomId, {
+            reliable: true,
+            serialization: 'json'
+          });
+        } catch (_) {
+          return;
+        }
+
+        if (!hostConnection) return;
 
         hostConnection.on('open', () => {
-          setConnectionStatus('Подключено к комнате', 'online');
-          addLog('Успешно подключено к комнате Хоста!', 'peer');
+          markGuestConnected();
+          hostConnection.send(stampMessage({
+            type: 'presence',
+            action: 'join',
+            role: 'guest'
+          }));
         });
 
         hostConnection.on('data', (data) => {
@@ -929,15 +1174,188 @@
         });
 
         hostConnection.on('close', () => {
-          setConnectionStatus('Отключено от Хоста', 'error');
-          updatePeerCount(0);
-          addLog('Соединение с Хостом потеряно', 'warn');
+          if (!hasAnyOpenWss()) {
+            guestConnectedToRoom = false;
+            setConnectionStatus('Переподключение...', 'waiting');
+          }
         });
+      }
 
-        hostConnection.on('error', () => {
-          setConnectionStatus('Ошибка подключения', 'error');
-          addLog('Не удалось подключиться к Хосту', 'warn');
+      // --- 2. Параллельный пул MQTT 3.1.1 over WSS (обход любых блокировок VPN/NAT) ---
+      function mqttEncodeLength(len) {
+        const bytes = [];
+        do {
+          let b = len % 128;
+          len = Math.floor(len / 128);
+          if (len > 0) b |= 128;
+          bytes.push(b);
+        } while (len > 0);
+        return bytes;
+      }
+
+      function mqttEncodeString(str) {
+        const utf8 = textEncoder.encode(str);
+        return [(utf8.length >> 8) & 0xff, utf8.length & 0xff, ...utf8];
+      }
+
+      function mqttBuildConnectPacket(clientId) {
+        const varHeader = [0x00, 0x04, 0x4d, 0x51, 0x54, 0x54, 0x04, 0x02, 0x00, 0x3c];
+        const body = [...varHeader, ...mqttEncodeString(clientId)];
+        return new Uint8Array([0x10, ...mqttEncodeLength(body.length), ...body]);
+      }
+
+      function mqttBuildSubscribePacket(topic) {
+        const body = [0x00, 0x01, ...mqttEncodeString(topic), 0x00];
+        return new Uint8Array([0x82, ...mqttEncodeLength(body.length), ...body]);
+      }
+
+      function mqttBuildPublishPacket(topic, payloadStr) {
+        const topicBytes = mqttEncodeString(topic);
+        const msgBytes = textEncoder.encode(payloadStr);
+        const remLen = mqttEncodeLength(topicBytes.length + msgBytes.length);
+        const packet = new Uint8Array(1 + remLen.length + topicBytes.length + msgBytes.length);
+        packet[0] = 0x30;
+        packet.set(remLen, 1);
+        packet.set(topicBytes, 1 + remLen.length);
+        packet.set(msgBytes, 1 + remLen.length + topicBytes.length);
+        return packet;
+      }
+
+      function publishWssMessage(data) {
+        let packet = null;
+        wssPool.forEach((entry) => {
+          if (entry.connected && entry.socket && entry.socket.readyState === WebSocket.OPEN) {
+            try {
+              if (!packet) {
+                packet = mqttBuildPublishPacket(roomTopic, JSON.stringify(data));
+              }
+              entry.socket.send(packet);
+            } catch (_) {}
+          }
         });
+      }
+
+      function initWssPool() {
+        WSS_BROKERS.forEach((brokerUrl) => {
+          connectSingleWssBroker(brokerUrl);
+        });
+      }
+
+      function connectSingleWssBroker(brokerUrl) {
+        let ws;
+        try {
+          ws = new WebSocket(brokerUrl, 'mqtt');
+          ws.binaryType = 'arraybuffer';
+        } catch (_) {
+          setTimeout(() => connectSingleWssBroker(brokerUrl), 5000);
+          return;
+        }
+
+        const state = {
+          socket: ws,
+          connected: false,
+          pingTimer: null
+        };
+        wssPool.set(brokerUrl, state);
+
+        const connectTimeout = setTimeout(() => {
+          if (!state.connected) {
+            try {
+              ws.close();
+            } catch (_) {}
+          }
+        }, 7000);
+
+        ws.onopen = () => {
+          const mqttClientId = `wp_${myClientId}_${Math.random().toString(36).slice(2, 7)}`;
+          try {
+            ws.send(mqttBuildConnectPacket(mqttClientId));
+          } catch (_) {}
+        };
+
+        ws.onmessage = (event) => {
+          const buf = new Uint8Array(event.data);
+          let offset = 0;
+
+          while (offset < buf.length) {
+            const packetType = buf[offset] >> 4;
+            let multiplier = 1;
+            let remLen = 0;
+            let idx = offset + 1;
+            let encodedByte;
+
+            do {
+              if (idx >= buf.length) return;
+              encodedByte = buf[idx++];
+              remLen += (encodedByte & 127) * multiplier;
+              multiplier *= 128;
+            } while ((encodedByte & 128) !== 0);
+
+            const packetEnd = idx + remLen;
+            if (packetEnd > buf.length) break;
+
+            // CONNACK (успешное подключение к MQTT брокеру)
+            if (packetType === 2) {
+              clearTimeout(connectTimeout);
+              state.connected = true;
+              try {
+                ws.send(mqttBuildSubscribePacket(roomTopic));
+              } catch (_) {}
+
+              if (state.pingTimer) clearInterval(state.pingTimer);
+              state.pingTimer = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                  try {
+                    ws.send(new Uint8Array([0xc0, 0x00]));
+                  } catch (_) {}
+                }
+              }, 25000);
+
+              // Если мы Гость — подключение к общему каналу комнаты установлено
+              if (!isHost && !guestConnectedToRoom) {
+                markGuestConnected();
+              }
+
+              setTimeout(() => {
+                sendNetworkMessage({
+                  type: 'presence',
+                  action: 'join',
+                  role: isHost ? 'host' : 'guest'
+                });
+              }, 100);
+            }
+
+            // PUBLISH (входящее сообщение из комнаты)
+            if (packetType === 3) {
+              const qos = (buf[offset] >> 1) & 0x03;
+              const topicLen = (buf[idx] << 8) | buf[idx + 1];
+              let payloadStart = idx + 2 + topicLen;
+              if (qos > 0) payloadStart += 2;
+
+              if (payloadStart <= packetEnd) {
+                try {
+                  const jsonStr = textDecoder.decode(buf.subarray(payloadStart, packetEnd));
+                  const parsed = JSON.parse(jsonStr);
+                  handleIncomingData(parsed);
+                } catch (_) {}
+              }
+            }
+
+            offset = packetEnd;
+          }
+        };
+
+        ws.onerror = () => {};
+
+        ws.onclose = () => {
+          clearTimeout(connectTimeout);
+          state.connected = false;
+          if (state.pingTimer) {
+            clearInterval(state.pingTimer);
+            state.pingTimer = null;
+          }
+          setTimeout(() => connectSingleWssBroker(brokerUrl), 4000);
+        };
       }
 
       // --- Обработчики кнопок интерфейса ---
@@ -954,6 +1372,12 @@
         } catch (_) {
           window.prompt('Скопируйте ссылку на комнату:', shareUrl);
         }
+      });
+
+      newRoomBtn.addEventListener('click', () => {
+        const freshRoomId = generateShortId('wp');
+        sessionStorage.setItem('wp_host_room', freshRoomId);
+        window.location.href = `${window.location.pathname}?room=${encodeURIComponent(freshRoomId)}`;
       });
 
       function handleLoadVideoClick() {
