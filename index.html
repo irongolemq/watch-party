@@ -473,10 +473,12 @@
 
       // --- Константы синхронизации ---
       const SYNC_THRESHOLD_SEC = 1.5;      // Порог рассинхрона при проверке во время воспроизведения
-      const PAUSE_SYNC_THRESHOLD = 0.25;   // При паузе форсируем точное выравнивание таймкода (от 0.25 сек)
+      const PAUSE_SYNC_THRESHOLD = 0.35;   // При паузе выравниваем таймкод, если расхождение >= 0.35 сек
+      const DRIFT_BEACON_THRESHOLD = 1.15; // Порог авто-коррекции накопленной задержки во время игры
+      const BUFFER_RECOVERY_DIFF = 0.70;   // Порог догона после подгрузки (buffering) плеера
       const REMOTE_LOCK_MS = 800;          // Защита от эхо-цикла (feedback loop)
-      const PLAY_SEEK_LEAD_SEC = 0.65;     // Компенсация буферизации при перемотке во время игры
-      const SENDER_START_HOLD_MS = 420;    // Микро-удержание стартующего плеера, чтобы пакет дошел до пиров и старт был одновременным
+      const PLAY_SEEK_LEAD_SEC = 0.60;     // Компенсация буферизации при перемотке во время игры
+      const SENDER_START_HOLD_MS = 400;    // Микро-удержание теплого плеера при старте воспроизведения
 
       // Конфигурация STUN + TURN серверов для обхода NAT и VPN в WebRTC (PeerJS)
       const PEERJS_CONFIG = {
@@ -537,6 +539,11 @@
       let pauseEnforceTimers = [];         // Таймеры повторного подтверждения паузы после перемотки
       let lastStateBroadcastAt = 0;
       let lastBroadcastedState = '';
+      let lastManualSyncAt = 0;            // Время последней явной синхронизации (чтобы маяк не мешал)
+      let hadRemotePauseSeek = false;      // Был ли плеер перемотан на паузе чужой командой (холодный буфер)
+      let isLocalBuffering = false;        // Идет ли сейчас подгрузка (buffering) локального плеера
+      let bufferingStartedAt = 0;
+      let consecutiveDriftCount = 0;       // Счетчик подряд идущих маяков с накопленным рассинхроном
       let pendingInitSync = null;          // Состояние для применения после загрузки iframe
 
       // --- Идентификация клиента и комнаты ---
@@ -601,7 +608,7 @@
 
       // Вычисляет точное текущее время плеера с учетом миллисекунд, прошедших с последнего события currentTime
       function getLiveCurrentTime() {
-        if (localState === 'playing' && lastTimeUpdateWallClock > 0) {
+        if (localState === 'playing' && !isLocalBuffering && lastTimeUpdateWallClock > 0) {
           const elapsedSec = (Date.now() - lastTimeUpdateWallClock) / 1000;
           if (elapsedSec > 0 && elapsedSec < 1.2) {
             return localCurrentTime + elapsedSec;
@@ -635,7 +642,7 @@
       }
 
       // Микро-удержание локального плеера при нажатии Play / Force Sync,
-      // чтобы за ~420 мс сетевой пакет дошел до друзей через VPN и оба плеера стартовали одновременно без форы у Хоста
+      // чтобы за время полета сетевого пакета оба плеера стартовали одновременно
       function holdLocalPlayerForCoordinatedStart(holdMs = SENDER_START_HOLD_MS) {
         clearSenderHoldTimer();
         clearPauseEnforceTimers();
@@ -671,7 +678,11 @@
       }
 
       function updateTelemetryUI() {
-        localStateLabel.textContent = localState === 'playing' ? '▶ Играет' : '⏸ Пауза';
+        if (isLocalBuffering) {
+          localStateLabel.textContent = '⏳ Подгрузка';
+        } else {
+          localStateLabel.textContent = localState === 'playing' ? '▶ Играет' : '⏸ Пауза';
+        }
         localTimeLabel.textContent = formatTimecode(localCurrentTime);
       }
 
@@ -776,6 +787,9 @@
         localCurrentTime = initialTime || 0;
         localState = normalizePlayerState(initialState) || 'paused';
         lastTimeUpdateWallClock = 0;
+        hadRemotePauseSeek = false;
+        isLocalBuffering = false;
+        consecutiveDriftCount = 0;
 
         playerPlaceholder.classList.add('hidden');
         if (playerIframe.src !== embedUrl) {
@@ -800,7 +814,7 @@
 
       // --- Применение входящей команды синхронизации ---
       function applyRemoteSyncCommand(payload) {
-        const { action, time, embedUrl, force = false } = payload;
+        const { action, time, embedUrl, force = false, senderHadColdPause = false } = payload;
         const state = normalizePlayerState(payload.state) || payload.state;
 
         if (embedUrl && embedUrl !== currentEmbedUrl) {
@@ -812,44 +826,59 @@
           return;
         }
 
+        lastManualSyncAt = Date.now();
+        consecutiveDriftCount = 0;
+        isLocalBuffering = false;
         clearSenderHoldTimer();
         clearPauseEnforceTimers();
         lockRemoteAction(REMOTE_LOCK_MS);
 
         if (state === 'paused') {
-          // При паузе ВСЕГДА форсируем синхронизацию таймкода (если разница >= 0.25 сек),
-          // чтобы у всех участников видео встало на один и тот же кадр и предзагрузило буфер
           localState = 'paused';
-          pausePlayer();
 
+          let didPauseSeek = false;
           if (typeof time === 'number' && !isNaN(time)) {
             const diff = Math.abs(time - localCurrentTime);
-            if (force || diff >= PAUSE_SYNC_THRESHOLD) {
+            // Перематываем на паузе если нажата кнопка force-sync ИЛИ расхождение >= 0.35 сек.
+            // Если расхождение меньше 0.35 сек — не вызываем seekPlayer, чтобы не сбрасывать теплый буфер!
+            if (action === 'force-sync' || diff >= PAUSE_SYNC_THRESHOLD) {
               seekPlayer(time);
               localCurrentTime = time;
               lastTimeUpdateWallClock = Date.now();
+              didPauseSeek = true;
+              hadRemotePauseSeek = true;
             }
           }
 
-          // Повторно подтверждаем паузу, чтобы Rutube не продолжил играть после завершения seek
-          lockRemoteAction(1000);
-          pauseEnforceTimers.push(
-            setTimeout(() => {
-              if (localState === 'paused') pausePlayer();
-            }, 140),
-            setTimeout(() => {
-              if (localState === 'paused') pausePlayer();
-            }, 340)
-          );
+          if (didPauseSeek) {
+            // Даем плееру 120 мс подгрузить кадр после seek, затем фиксируем паузу (чтобы буфер остался теплым)
+            lockRemoteAction(1050);
+            pauseEnforceTimers.push(
+              setTimeout(() => {
+                if (localState === 'paused') pausePlayer();
+              }, 110),
+              setTimeout(() => {
+                if (localState === 'paused') pausePlayer();
+              }, 280),
+              setTimeout(() => {
+                if (localState === 'paused') pausePlayer();
+              }, 480)
+            );
+          } else {
+            pausePlayer();
+            pauseEnforceTimers.push(
+              setTimeout(() => {
+                if (localState === 'paused') pausePlayer();
+              }, 150)
+            );
+          }
         } else if (state === 'playing') {
           localState = 'playing';
+          hadRemotePauseSeek = false;
           let didSeek = false;
 
           if (typeof time === 'number' && !isNaN(time)) {
             const diff = Math.abs(time - getLiveCurrentTime());
-            // Если время уже совпадает (например, старт с 00:00 или после общей паузы) —
-            // НЕ вызываем seekPlayer, чтобы не сбрасывать буфер (Хост ждет нас через микро-удержание 420 мс).
-            // Если же есть рассинхрон >= 1.5 сек или нажата принудительная синхронизация — перематываем с упреждением.
             if (force || diff >= SYNC_THRESHOLD_SEC) {
               const lead = action === 'force-sync' ? 0.35 : PLAY_SEEK_LEAD_SEC;
               const targetTime = time + lead;
@@ -860,14 +889,25 @@
             }
           }
 
-          playPlayer();
-          if (didSeek) {
+          // Если Play нажал тот пир, который до этого получил удаленную паузу с перемоткой (senderHadColdPause),
+          // его плеер стартует на ~220 мс дольше нашего теплого буфера — поэтому запускаем наш плеер через 220 мс
+          if (!didSeek && senderHadColdPause) {
+            lockRemoteAction(650);
             setTimeout(() => {
               if (localState === 'playing') {
-                lockRemoteAction(500);
                 playPlayer();
               }
-            }, 180);
+            }, 220);
+          } else {
+            playPlayer();
+            if (didSeek) {
+              setTimeout(() => {
+                if (localState === 'playing') {
+                  lockRemoteAction(500);
+                  playPlayer();
+                }
+              }, 180);
+            }
           }
         }
 
@@ -882,6 +922,52 @@
           addLog(`Воспроизведение на ${tc}`, 'sync');
         } else if (state === 'paused') {
           addLog(`Пауза и синхронизация на ${tc}`, 'sync');
+        }
+      }
+
+      // --- Авто-коррекция рассинхрона по маяку времени (после подгрузки или накопления задержки) ---
+      function handleIncomingTimeBeacon(payload) {
+        if (!currentEmbedUrl || payload.embedUrl !== currentEmbedUrl) return;
+        if (localState !== 'playing' || payload.state !== 'playing') return;
+        if (isRemoteAction || isLocalBuffering || senderHoldTimer) return;
+        if (Date.now() - lastManualSyncAt < 2500) return;
+
+        const remoteTime = payload.time;
+        if (typeof remoteTime !== 'number' || isNaN(remoteTime)) return;
+
+        const myLiveTime = getLiveCurrentTime();
+        const drift = Math.abs(remoteTime - myLiveTime);
+
+        // 1. Если это срочный ответ после подгрузки буфера (urgent) и мы отстали >= 0.7 сек — сразу догоняем
+        if (payload.urgent && drift >= BUFFER_RECOVERY_DIFF) {
+          consecutiveDriftCount = 0;
+          const targetTime = remoteTime + PLAY_SEEK_LEAD_SEC;
+          lockRemoteAction(850);
+          seekPlayer(targetTime);
+          playPlayer();
+          localCurrentTime = targetTime;
+          lastTimeUpdateWallClock = Date.now();
+          updateTelemetryUI();
+          addLog(`Догон таймкода после подгрузки буфера (${formatTimecode(targetTime)})`, 'sync');
+          return;
+        }
+
+        // 2. Плавный контроль накопленной со временем задержки (если 2 маяка подряд расхождение >= 1.15 сек)
+        if (drift >= DRIFT_BEACON_THRESHOLD && drift < 300) {
+          consecutiveDriftCount++;
+          if (consecutiveDriftCount >= 2) {
+            consecutiveDriftCount = 0;
+            const targetTime = remoteTime + PLAY_SEEK_LEAD_SEC;
+            lockRemoteAction(850);
+            seekPlayer(targetTime);
+            playPlayer();
+            localCurrentTime = targetTime;
+            lastTimeUpdateWallClock = Date.now();
+            updateTelemetryUI();
+            addLog(`Авто-выравнивание накопленной задержки (${formatTimecode(targetTime)})`, 'sync');
+          }
+        } else {
+          consecutiveDriftCount = 0;
         }
       }
 
@@ -929,8 +1015,18 @@
           // Если время плавно идет вперед вне удаленной команды — плеер в режиме воспроизведения
           if (!isRemoteAction && elapsedWallSec > 0.05 && elapsedWallSec < 1.2) {
             const forwardStep = newTime - prevTime;
-            if (forwardStep > 0.05 && forwardStep < 1.5 && localState !== 'playing') {
-              localState = 'playing';
+            if (forwardStep > 0.05 && forwardStep < 1.5) {
+              if (localState !== 'playing') {
+                localState = 'playing';
+              }
+              if (isLocalBuffering) {
+                isLocalBuffering = false;
+                // Запрашиваем у комнаты актуальный маяк времени после завершения подгрузки
+                sendNetworkMessage({
+                  type: 'request-beacon',
+                  embedUrl: currentEmbedUrl
+                });
+              }
             }
           }
 
@@ -946,6 +1042,7 @@
               if (seekBroadcastTimer) clearTimeout(seekBroadcastTimer);
               seekBroadcastTimer = setTimeout(() => {
                 if (!isRemoteAction) {
+                  lastManualSyncAt = Date.now();
                   const liveTime = getLiveCurrentTime();
                   addLog(`Перемотка на ${formatTimecode(liveTime)}`, 'info');
                   sendNetworkMessage({
@@ -963,12 +1060,41 @@
           return;
         }
 
-        // 2. Смена статуса плеера (Rutube присылает 'playing' или 'pause' / 'paused' в player:changeState)
+        // 2. Смена статуса плеера ('playing', 'pause'/'paused', 'buffering')
         if (message.type === 'player:changeState' && message.data) {
-          const normalizedState = normalizePlayerState(message.data.state);
+          const rawState = String(message.data.state || '').trim().toLowerCase();
+
+          // Отслеживаем начало подгрузки (buffering) у пользователя во время игры
+          if (rawState === 'buffering' || rawState === 'seeking') {
+            if (!isRemoteAction && localState === 'playing' && !isLocalBuffering) {
+              isLocalBuffering = true;
+              bufferingStartedAt = Date.now();
+              updateTelemetryUI();
+            }
+            return;
+          }
+
+          const normalizedState = normalizePlayerState(rawState);
           if (!normalizedState) {
             return;
           }
+
+          // Если плеер только что вышел из подгрузки буфера (buffering -> playing) —
+          // НЕ рассылаем ложный Play остальным, а запрашиваем актуальное время комнаты, чтобы догнать поток!
+          if (isLocalBuffering && normalizedState === 'playing') {
+            isLocalBuffering = false;
+            updateTelemetryUI();
+            const bufferedMs = Date.now() - bufferingStartedAt;
+            if (bufferedMs >= 350 && !isRemoteAction) {
+              sendNetworkMessage({
+                type: 'request-beacon',
+                embedUrl: currentEmbedUrl
+              });
+            }
+            return;
+          }
+
+          isLocalBuffering = false;
 
           // Если событие вызвано программным переключением (или микро-удержанием старта) — игнорируем
           if (isRemoteAction) {
@@ -980,9 +1106,13 @@
             return;
           }
 
+          const wasColdPause = hadRemotePauseSeek;
+          hadRemotePauseSeek = false;
           localState = normalizedState;
           lastBroadcastedState = normalizedState;
           lastStateBroadcastAt = now;
+          lastManualSyncAt = now;
+          consecutiveDriftCount = 0;
           updateTelemetryUI();
 
           const syncTime = normalizedState === 'playing' ? getLiveCurrentTime() : localCurrentTime;
@@ -995,19 +1125,22 @@
             state: localState,
             time: syncTime,
             embedUrl: currentEmbedUrl,
-            force: localState === 'paused'
+            force: false,
+            senderHadColdPause: normalizedState === 'playing' && wasColdPause
           });
 
           if (normalizedState === 'playing') {
             addLog(`Вы включили воспроизведение на ${tc}`, 'info');
-            // Если есть подключенные друзья — придерживаем локальный старт на 420 мс,
-            // чтобы команда успела дойти по сети и видео пошло синхронно без забегания вперед
+            // Если мы сами ставили паузу (буфер теплый) — придерживаем старт на 400 мс, чтобы пиры успели получить пакет.
+            // Если же паузу ставил другой человек и у нас был pause-seek (wasColdPause) — наш плеер сам тратит ~200 мс на старт,
+            // поэтому придерживаем всего на 160 мс, а теплый плеер друга подождет нас 220 мс.
             if (activeRoomPeers.size > 0 || guestConnections.size > 0 || !isHost) {
-              holdLocalPlayerForCoordinatedStart(SENDER_START_HOLD_MS);
+              const holdDuration = wasColdPause ? 160 : SENDER_START_HOLD_MS;
+              holdLocalPlayerForCoordinatedStart(holdDuration);
             }
           } else {
             clearSenderHoldTimer();
-            addLog(`Вы поставили паузу на ${tc} (синхронизация всех)`, 'info');
+            addLog(`Вы поставили паузу на ${tc}`, 'info');
           }
         }
       });
@@ -1092,7 +1225,14 @@
         }
 
         // Ретрансляция Хостом по WebRTC другим гостям
-        if (isHost && webrtcSenderPeerId && (data.type === 'sync' || data.type === 'load-video')) {
+        if (
+          isHost &&
+          webrtcSenderPeerId &&
+          (data.type === 'sync' ||
+            data.type === 'load-video' ||
+            data.type === 'time-beacon' ||
+            data.type === 'request-beacon')
+        ) {
           broadcastFromHostWebRTC(data, webrtcSenderPeerId);
         }
 
@@ -1117,6 +1257,26 @@
               });
             }
           }
+          return;
+        }
+
+        // Если у кого-то завершилась подгрузка буфера (request-beacon) —
+        // активно играющий участник сразу отправляет точный маяк времени для догона
+        if (data.type === 'request-beacon') {
+          if (currentEmbedUrl && localState === 'playing' && !isLocalBuffering && !isRemoteAction) {
+            sendNetworkMessage({
+              type: 'time-beacon',
+              embedUrl: currentEmbedUrl,
+              time: getLiveCurrentTime(),
+              state: 'playing',
+              urgent: true
+            });
+          }
+          return;
+        }
+
+        if (data.type === 'time-beacon') {
+          handleIncomingTimeBeacon(data);
           return;
         }
 
@@ -1186,6 +1346,28 @@
           });
           refreshPeerCountUI();
         }, 8000);
+
+        // Периодический маяк времени от Хоста (каждые 4.5 сек во время воспроизведения),
+        // чтобы у друзей не накапливалась задержка со временем и компенсировались микрофризы
+        setInterval(() => {
+          if (
+            isHost &&
+            currentEmbedUrl &&
+            localState === 'playing' &&
+            !isLocalBuffering &&
+            !isRemoteAction &&
+            !senderHoldTimer &&
+            (activeRoomPeers.size > 0 || guestConnections.size > 0)
+          ) {
+            sendNetworkMessage({
+              type: 'time-beacon',
+              embedUrl: currentEmbedUrl,
+              time: getLiveCurrentTime(),
+              state: 'playing',
+              urgent: false
+            });
+          }
+        }, 4500);
 
         window.addEventListener('beforeunload', () => {
           sendNetworkMessage({
@@ -1537,6 +1719,7 @@
           return;
         }
 
+        lastManualSyncAt = Date.now();
         const liveTime = getLiveCurrentTime();
         const tc = formatTimecode(liveTime);
         addLog(
