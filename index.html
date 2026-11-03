@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rutube Watch Party — Синхронный просмотр</title>
+  <title>Watch Party — Rutube + VK Видео</title>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
     :root {
@@ -399,7 +399,7 @@
         <div class="brand-and-status">
           <div class="brand">
             <span class="brand-dot"></span>
-            <span>Rutube Watch Party</span>
+            <span>Watch Party · Rutube + VK Видео</span>
           </div>
           <div class="status-badges">
             <div class="badge" id="connectionBadge">
@@ -428,7 +428,7 @@
           type="text"
           id="videoUrlInput"
           class="input-url"
-          placeholder="Вставьте ссылку на видео Rutube (например, https://rutube.ru/video/c6582a09.../)"
+          placeholder="Ссылка на Rutube или VK Видео (rutube.ru/video/..., vkvideo.ru/video-123_456, код встраивания VK)"
           autocomplete="off"
         />
         <button class="btn btn-primary" id="loadVideoBtn" type="button">
@@ -443,11 +443,11 @@
         <div class="player-placeholder-icon">🎬</div>
         <div class="player-placeholder-title">Видео ещё не выбрано</div>
         <div class="player-placeholder-sub">
-          Вставьте ссылку на ролик с Rutube в поле выше и нажмите «Загрузить для всех», чтобы начать синхронный просмотр.
+          Вставьте ссылку на ролик с Rutube или VK Видео в поле выше и нажмите «Загрузить для всех», чтобы начать синхронный просмотр.
         </div>
       </div>
       <iframe
-        id="rutubePlayer"
+        id="videoPlayer"
         src="about:blank"
         allow="autoplay; fullscreen; picture-in-picture; encrypted-media; gyroscope; accelerometer; clipboard-write"
         allowfullscreen
@@ -532,7 +532,7 @@
       const newRoomBtn = document.getElementById('newRoomBtn');
       const videoUrlInput = document.getElementById('videoUrlInput');
       const loadVideoBtn = document.getElementById('loadVideoBtn');
-      const playerIframe = document.getElementById('rutubePlayer');
+      let playerIframe = document.getElementById('videoPlayer');
       const playerPlaceholder = document.getElementById('playerPlaceholder');
       const forceSyncBtn = document.getElementById('forceSyncBtn');
       const pullSyncBtn = document.getElementById('pullSyncBtn');
@@ -542,6 +542,9 @@
 
       // --- Состояние плеера и синхронизации ---
       let currentEmbedUrl = '';
+      let currentProvider = 'rutube';      // 'rutube' | 'vk'
+      let vkPlayer = null;                 // Экземпляр VK.VideoPlayer
+      let vkPollTimer = null;
       let localState = 'paused';           // 'playing' | 'paused'
       let localCurrentTime = 0;            // Последнее полученное время от плеера в секундах
       let lastTimeUpdateWallClock = 0;     // Wall-clock время последнего события currentTime (Date.now())
@@ -672,12 +675,12 @@
         clearSenderHoldTimer();
         clearPauseEnforceTimers();
         lockRemoteAction(holdMs + 550);
-        sendCommandToPlayer('player:pause', {});
+        playerCommand('pause');
         senderHoldTimer = setTimeout(() => {
           senderHoldTimer = null;
           if (localState === 'playing') {
             lockRemoteAction(450);
-            sendCommandToPlayer('player:play', {});
+            playerCommand('play');
           }
         }, holdMs);
       }
@@ -782,29 +785,191 @@
         return embedUrl;
       }
 
-      // --- Команды для Rutube Iframe API ---
-      function sendCommandToPlayer(type, data = {}) {
-        if (!playerIframe || !playerIframe.contentWindow || !currentEmbedUrl) return;
-        const payload = JSON.stringify({ type, data });
-        playerIframe.contentWindow.postMessage(payload, '*');
+      // --- Парсинг ссылки VK Видео ---
+      // Поддерживает: vk.com/video-123_456, vkvideo.ru/video-123_456, vk.com/video?z=video-123_456,
+      // vk.com/clip-123_456, vk.ru/..., m.vk.com/..., а также готовый код встраивания video_ext.php (с hash для приватных видео)
+      function buildVkEmbedUrl(oid, id, hash) {
+        let url = `https://vk.com/video_ext.php?oid=${encodeURIComponent(oid)}&id=${encodeURIComponent(id)}`;
+        if (hash) url += `&hash=${encodeURIComponent(hash)}`;
+        return url + '&hd=2&js_api=1';
+      }
+
+      function parseVkToEmbed(rawInput) {
+        if (!rawInput) return null;
+        const input = rawInput.trim().replace(/&amp;/g, '&');
+
+        // 1. Готовая embed-ссылка или <iframe> код встраивания
+        const extMatch = input.match(/(?:vk\.com|vk\.ru|vkvideo\.ru)\/video_ext\.php\?([^\s"'<>]+)/i);
+        if (extMatch) {
+          const q = new URLSearchParams(extMatch[1]);
+          const oid = q.get('oid');
+          const id = q.get('id');
+          if (oid && id) return buildVkEmbedUrl(oid, id, q.get('hash'));
+        }
+
+        // 2. Обычная ссылка на видео / клип
+        const linkMatch = input.match(/(?:vk\.com|vk\.ru|vkvideo\.ru)\/[^\s]*?(?:video|clip)(-?\d+)_(\d+)/i);
+        if (linkMatch) return buildVkEmbedUrl(linkMatch[1], linkMatch[2], null);
+
+        // 3. Просто идентификатор вида video-123_456
+        const idMatch = input.match(/^(?:video|clip)(-?\d+)_(\d+)$/i);
+        if (idMatch) return buildVkEmbedUrl(idMatch[1], idMatch[2], null);
+
+        return null;
+      }
+
+      function parseVideoUrl(rawInput) {
+        return parseRutubeToEmbed(rawInput) || parseVkToEmbed(rawInput);
+      }
+
+      function getProviderFromEmbed(embedUrl) {
+        return /video_ext\.php/i.test(embedUrl || '') ? 'vk' : 'rutube';
+      }
+
+      // --- VK Video Player JS API (https://vk.com/js/api/videoplayer.js) ---
+      let vkApiPromise = null;
+
+      function loadScriptOnce(src) {
+        return new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = src;
+          s.async = true;
+          s.onload = () => resolve();
+          s.onerror = () => {
+            s.remove();
+            reject(new Error(`Не удалось загрузить ${src}`));
+          };
+          document.head.appendChild(s);
+        });
+      }
+
+      function ensureVkApi() {
+        if (window.VK && typeof window.VK.VideoPlayer === 'function') return Promise.resolve();
+        if (vkApiPromise) return vkApiPromise;
+        vkApiPromise = loadScriptOnce('https://vk.com/js/api/videoplayer.js')
+          .catch(() => loadScriptOnce('https://vk.ru/js/api/videoplayer.js'))
+          .then(() => {
+            if (!(window.VK && typeof window.VK.VideoPlayer === 'function')) {
+              throw new Error('VK.VideoPlayer недоступен');
+            }
+          })
+          .catch((err) => {
+            vkApiPromise = null;
+            throw err;
+          });
+        return vkApiPromise;
+      }
+
+      function teardownVkPlayer() {
+        if (vkPollTimer) {
+          clearInterval(vkPollTimer);
+          vkPollTimer = null;
+        }
+        if (vkPlayer && typeof vkPlayer.destroy === 'function') {
+          try {
+            vkPlayer.destroy();
+          } catch (_) {}
+        }
+        vkPlayer = null;
+      }
+
+      function initVkPlayer(iframe) {
+        ensureVkApi()
+          .then(() => {
+            if (iframe !== playerIframe || currentProvider !== 'vk') return;
+            const player = window.VK.VideoPlayer(iframe);
+            vkPlayer = player;
+            let lastReportedTime = -1;
+
+            const reportTime = (t) => {
+              if (typeof t !== 'number' || isNaN(t) || t === lastReportedTime) return;
+              lastReportedTime = t;
+              handlePlayerTimeUpdate(t);
+            };
+
+            // VK события -> общие обработчики (те же, что и для Rutube)
+            player.on('started', () => handlePlayerStateChange('playing'));
+            player.on('resumed', () => handlePlayerStateChange('playing'));
+            player.on('paused', () => handlePlayerStateChange('paused'));
+            player.on('ended', () => handlePlayerStateChange('ended'));
+            player.on('timeupdate', (state) => {
+              const t = typeof state === 'number' ? state : state && (state.time ?? state.currentTime);
+              reportTime(t);
+            });
+            player.on('error', () => addLog('Ошибка плеера VK Видео (видео недоступно для встраивания?)', 'warn'));
+
+            // Резервный опрос времени, если timeupdate приходит редко (шлем только изменившееся значение)
+            vkPollTimer = setInterval(() => {
+              if (vkPlayer !== player) return;
+              try {
+                if (player.getState && player.getState() === 'playing') {
+                  reportTime(player.getCurrentTime());
+                }
+              } catch (_) {}
+            }, 500);
+          })
+          .catch(() => {
+            addLog('Не удалось загрузить VK Video JS API — синхронизация VK видео недоступна', 'warn');
+          });
+      }
+
+      // Пересоздает iframe под нужного провайдера (чтобы не оставалось старых слушателей)
+      function mountPlayerIframe(embedUrl) {
+        teardownVkPlayer();
+        const provider = getProviderFromEmbed(embedUrl);
+        const fresh = document.createElement('iframe');
+        fresh.id = 'videoPlayer';
+        fresh.setAttribute(
+          'allow',
+          'autoplay; fullscreen; picture-in-picture; encrypted-media; gyroscope; accelerometer; clipboard-write; screen-wake-lock'
+        );
+        fresh.setAttribute('allowfullscreen', '');
+        fresh.setAttribute('frameborder', '0');
+        fresh.src = embedUrl;
+        playerIframe.replaceWith(fresh);
+        playerIframe = fresh;
+        currentProvider = provider;
+        if (provider === 'vk') initVkPlayer(fresh);
+      }
+
+      // --- Унифицированные команды плеера (Rutube postMessage / VK JS API) ---
+      function playerCommand(cmd, arg) {
+        if (!playerIframe || !currentEmbedUrl) return;
+
+        if (currentProvider === 'vk') {
+          if (!vkPlayer) return;
+          try {
+            if (cmd === 'play') vkPlayer.play();
+            else if (cmd === 'pause') vkPlayer.pause();
+            else if (cmd === 'seek') vkPlayer.seek(arg);
+          } catch (_) {}
+          return;
+        }
+
+        if (!playerIframe.contentWindow) return;
+        let message = null;
+        if (cmd === 'play') message = { type: 'player:play', data: {} };
+        else if (cmd === 'pause') message = { type: 'player:pause', data: {} };
+        else if (cmd === 'seek') message = { type: 'player:setCurrentTime', data: { time: arg } };
+        if (message) playerIframe.contentWindow.postMessage(JSON.stringify(message), '*');
       }
 
       function playPlayer() {
         clearPauseEnforceTimers();
-        sendCommandToPlayer('player:play', {});
+        playerCommand('play');
       }
 
       function pausePlayer() {
         clearSenderHoldTimer();
-        sendCommandToPlayer('player:pause', {});
+        playerCommand('pause');
       }
 
       function seekPlayer(seconds) {
-        // НИКОГДА не отправляем player:setCurrentTime в iframe Rutube до того, как плеер впервые запустил воспроизведение!
+        // НИКОГДА не перематываем плеер до того, как он впервые запустил воспроизведение!
         // Вызов setCurrentTime на стартовом экране Rutube ломает его HLS-загрузчик и вешает бесконечный спиннер.
         if (!hasVideoStartedOnce) return;
         const target = Math.max(0, Number(seconds) || 0);
-        sendCommandToPlayer('player:setCurrentTime', { time: target });
+        playerCommand('seek', target);
       }
 
       // --- Загрузка видео в плеер ---
@@ -832,7 +997,7 @@
           consecutiveDriftCount = 0;
 
           playerPlaceholder.classList.add('hidden');
-          playerIframe.src = embedUrl;
+          mountPlayerIframe(embedUrl);
           videoUrlInput.value = embedUrl;
         }
 
@@ -1084,7 +1249,8 @@
 
       // --- Обработка событий от Rutube Iframe через window.addEventListener('message') ---
       window.addEventListener('message', (event) => {
-        if (!event.data) return;
+        if (currentProvider !== 'rutube' || !event.data) return;
+        if (typeof event.origin === 'string' && event.origin.indexOf('rutube') === -1) return;
 
         let message;
         try {
@@ -1097,7 +1263,19 @@
 
         // 1. Текущее время плеера
         if (message.type === 'player:currentTime' && message.data && typeof message.data.time === 'number') {
-          const newTime = message.data.time;
+          handlePlayerTimeUpdate(message.data.time);
+          return;
+        }
+
+        // 2. Смена статуса плеера
+        if (message.type === 'player:changeState' && message.data) {
+          handlePlayerStateChange(message.data.state);
+        }
+      });
+
+      // --- Общий обработчик текущего времени плеера (Rutube и VK Видео) ---
+      function handlePlayerTimeUpdate(newTime) {
+          if (typeof newTime !== 'number' || isNaN(newTime)) return;
           const now = Date.now();
           const prevTime = localCurrentTime;
           const elapsedWallSec = lastTimeUpdateWallClock > 0 ? (now - lastTimeUpdateWallClock) / 1000 : 0;
@@ -1159,12 +1337,11 @@
               }, 60);
             }
           }
-          return;
-        }
+      }
 
-        // 2. Смена статуса плеера ('playing', 'pause'/'paused', 'buffering')
-        if (message.type === 'player:changeState' && message.data) {
-          const rawState = String(message.data.state || '').trim().toLowerCase();
+      // --- Общий обработчик смены статуса плеера (Rutube и VK Видео): 'playing', 'pause'/'paused', 'buffering' ---
+      function handlePlayerStateChange(rawStateInput) {
+          const rawState = String(rawStateInput || '').trim().toLowerCase();
 
           // Отслеживаем начало подгрузки (buffering) ТОЛЬКО если видео уже реально запускалось
           if (rawState === 'buffering' || rawState === 'seeking') {
@@ -1260,8 +1437,7 @@
             clearSenderHoldTimer();
             addLog(`Вы поставили паузу на ${tc}`, 'info');
           }
-        }
-      });
+      }
 
       // =========================================================================
       // СЕТЬ: Гибридный транспорт PeerJS (WebRTC DataChannel) + Пул WSS Relay
@@ -1814,10 +1990,10 @@
 
       function handleLoadVideoClick() {
         const rawUrl = videoUrlInput.value;
-        const embedUrl = parseRutubeToEmbed(rawUrl);
+        const embedUrl = parseVideoUrl(rawUrl);
 
         if (!embedUrl) {
-          addLog('Неверная ссылка Rutube. Пример: https://rutube.ru/video/c6582a09.../', 'warn');
+          addLog('Неверная ссылка. Примеры: https://rutube.ru/video/c6582a09.../ или https://vkvideo.ru/video-123_456', 'warn');
           videoUrlInput.focus();
           return;
         }
@@ -1849,7 +2025,7 @@
         // Если наш плеер еще не был запущен (висит на 00:00 после входа/F5) —
         // вместо сброса всей комнаты в 00:00 запрашиваем синхронизацию у комнаты
         if (!hasVideoStartedOnce && pendingInitSync) {
-          addLog('Сначала нажмите кнопку Play внутри самого плеера Rutube, чтобы разблокировать воспроизведение', 'warn');
+          addLog('Сначала нажмите кнопку Play внутри самого плеера, чтобы разблокировать воспроизведение', 'warn');
           return;
         }
 
@@ -1881,7 +2057,7 @@
           return;
         }
         if (!hasVideoStartedOnce) {
-          addLog('Нажмите кнопку Play в центре плеера Rutube — видео сразу перемотается к таймкоду комнаты!', 'warn');
+          addLog('Нажмите кнопку Play в центре плеера — видео сразу перемотается к таймкоду комнаты!', 'warn');
           return;
         }
         addLog('Запрос текущего таймкода у комнаты...', 'info');
