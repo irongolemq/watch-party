@@ -562,6 +562,7 @@
       let bufferingStartedAt = 0;
       let consecutiveDriftCount = 0;       // Счетчик подряд идущих маяков с накопленным рассинхроном
       let pendingInitSync = null;          // Целевое состояние комнаты для применения сразу после первого Play в плеере
+      let isInitialSyncing = false;        // Защита от шторма маяков при первой синхронизации после перезагрузки
 
       // --- Идентификация клиента и комнаты ---
       function generateShortId(prefix) {
@@ -786,34 +787,54 @@
       }
 
       // --- Парсинг ссылки VK Видео ---
-      // Поддерживает: vk.com/video-123_456, vkvideo.ru/video-123_456, vk.com/video?z=video-123_456,
-      // vk.com/clip-123_456, vk.ru/..., m.vk.com/..., а также готовый код встраивания video_ext.php (с hash для приватных видео)
-      function buildVkEmbedUrl(oid, id, hash) {
-        let url = `https://vk.com/video_ext.php?oid=${encodeURIComponent(oid)}&id=${encodeURIComponent(id)}`;
-        if (hash) url += `&hash=${encodeURIComponent(hash)}`;
-        return url + '&hd=2&js_api=1';
-      }
-
+      // Поддерживает: код встраивания iframe, video_ext.php с hash, vkvideo.ru/video-123_456, vk.com/video-123_456,
+      // vk.com/video?z=video-123_456, клипы, vk.ru и m.vk.com.
       function parseVkToEmbed(rawInput) {
         if (!rawInput) return null;
         const input = rawInput.trim().replace(/&amp;/g, '&');
 
-        // 1. Готовая embed-ссылка или <iframe> код встраивания
-        const extMatch = input.match(/(?:vk\.com|vk\.ru|vkvideo\.ru)\/video_ext\.php\?([^\s"'<>]+)/i);
+        // 1. Код встраивания <iframe> или прямая ссылка video_ext.php
+        const extMatch = input.match(/(https?:\/\/[^\s"'<>]*(?:vk\.com|vk\.ru|vkvideo\.ru)[^\s"'<>]*\/video_ext\.php\?[^\s"'<>]+)/i);
         if (extMatch) {
-          const q = new URLSearchParams(extMatch[1]);
-          const oid = q.get('oid');
-          const id = q.get('id');
-          if (oid && id) return buildVkEmbedUrl(oid, id, q.get('hash'));
+          try {
+            const parsed = new URL(extMatch[1]);
+            parsed.searchParams.set('js_api', '1');
+            if (!parsed.searchParams.has('hd')) parsed.searchParams.set('hd', '2');
+            return parsed.toString();
+          } catch (_) {}
         }
 
-        // 2. Обычная ссылка на видео / клип
-        const linkMatch = input.match(/(?:vk\.com|vk\.ru|vkvideo\.ru)\/[^\s]*?(?:video|clip)(-?\d+)_(\d+)/i);
-        if (linkMatch) return buildVkEmbedUrl(linkMatch[1], linkMatch[2], null);
+        // Относительный или скопированный без домена video_ext.php
+        const relMatch = input.match(/video_ext\.php\?([^\s"'<>]+)/i);
+        if (relMatch) {
+          const q = new URLSearchParams(relMatch[1]);
+          const oid = q.get('oid');
+          const id = q.get('id');
+          if (oid && id) {
+            let u = `https://vkvideo.ru/video_ext.php?oid=${encodeURIComponent(oid)}&id=${encodeURIComponent(id)}`;
+            if (q.get('hash')) u += `&hash=${encodeURIComponent(q.get('hash'))}`;
+            return u + '&hd=2&js_api=1';
+          }
+        }
 
-        // 3. Просто идентификатор вида video-123_456
-        const idMatch = input.match(/^(?:video|clip)(-?\d+)_(\d+)$/i);
-        if (idMatch) return buildVkEmbedUrl(idMatch[1], idMatch[2], null);
+        // 2. Обычные ссылки на видео / клип: vkvideo.ru, vk.com, vk.ru
+        const hostMatch = input.match(/https?:\/\/([a-zA-Z0-9\-_.]*(?:vk\.com|vk\.ru|vkvideo\.ru))/i);
+        const host = hostMatch ? hostMatch[1] : 'vkvideo.ru';
+
+        const vidMatch = input.match(/(?:video|clip)(-?\d+)_(\d+)/i);
+        if (vidMatch) {
+          const oid = vidMatch[1];
+          const id = vidMatch[2];
+          let hash = null;
+          try {
+            const parsedUrl = new URL(input);
+            hash = parsedUrl.searchParams.get('hash') || parsedUrl.searchParams.get('list_hash');
+          } catch (_) {}
+
+          let u = `https://${host}/video_ext.php?oid=${encodeURIComponent(oid)}&id=${encodeURIComponent(id)}`;
+          if (hash) u += `&hash=${encodeURIComponent(hash)}`;
+          return u + '&hd=2&js_api=1';
+        }
 
         return null;
       }
@@ -823,7 +844,7 @@
       }
 
       function getProviderFromEmbed(embedUrl) {
-        return /video_ext\.php/i.test(embedUrl || '') ? 'vk' : 'rutube';
+        return /(?:vk\.com|vk\.ru|vkvideo\.ru|video_ext\.php)/i.test(embedUrl || '') ? 'vk' : 'rutube';
       }
 
       // --- VK Video Player JS API (https://vk.com/js/api/videoplayer.js) ---
@@ -888,6 +909,9 @@
             };
 
             // VK события -> общие обработчики (те же, что и для Rutube)
+            player.on('inited', () => {
+              // Плеер VK готов
+            });
             player.on('started', () => handlePlayerStateChange('playing'));
             player.on('resumed', () => handlePlayerStateChange('playing'));
             player.on('paused', () => handlePlayerStateChange('paused'));
@@ -896,9 +920,16 @@
               const t = typeof state === 'number' ? state : state && (state.time ?? state.currentTime);
               reportTime(t);
             });
-            player.on('error', () => addLog('Ошибка плеера VK Видео (видео недоступно для встраивания?)', 'warn'));
+            player.on('error', (err) => {
+              const code = err && (err.errorCode || err.code || err);
+              if (code === 100 || code === 'autoplaySoundProhibited') {
+                addLog('Нажмите кнопку воспроизведения внутри плеера VK для включения звука', 'info');
+              } else {
+                addLog(`Сообщение плеера VK (код: ${code || '?'}). Если видео приватное, вставьте код встраивания с hash.`, 'warn');
+              }
+            });
 
-            // Резервный опрос времени, если timeupdate приходит редко (шлем только изменившееся значение)
+            // Резервный опрос времени
             vkPollTimer = setInterval(() => {
               if (vkPlayer !== player) return;
               try {
@@ -909,7 +940,7 @@
             }, 500);
           })
           .catch(() => {
-            addLog('Не удалось загрузить VK Video JS API — синхронизация VK видео недоступна', 'warn');
+            addLog('Предупреждение: VK Video JS API недоступен, управление будет через postMessage', 'warn');
           });
       }
 
@@ -937,21 +968,38 @@
         if (!playerIframe || !currentEmbedUrl) return;
 
         if (currentProvider === 'vk') {
-          if (!vkPlayer) return;
-          try {
-            if (cmd === 'play') vkPlayer.play();
-            else if (cmd === 'pause') vkPlayer.pause();
-            else if (cmd === 'seek') vkPlayer.seek(arg);
-          } catch (_) {}
+          // 1. Через официальный VK VideoPlayer JS API
+          if (vkPlayer) {
+            try {
+              if (cmd === 'play') vkPlayer.play();
+              else if (cmd === 'pause') vkPlayer.pause();
+              else if (cmd === 'seek') vkPlayer.seek(arg);
+            } catch (_) {}
+          }
+          // 2. Прямой postMessage в iframe VK (согласно протоколу videoplayer.js)
+          if (playerIframe.contentWindow) {
+            try {
+              let m = null;
+              if (cmd === 'play') m = { method: 'play' };
+              else if (cmd === 'pause') m = { method: 'pause' };
+              else if (cmd === 'seek') m = { method: 'seek', time: arg };
+              if (m) playerIframe.contentWindow.postMessage(m, '*');
+            } catch (_) {}
+          }
           return;
         }
 
+        // Rutube postMessage
         if (!playerIframe.contentWindow) return;
         let message = null;
         if (cmd === 'play') message = { type: 'player:play', data: {} };
         else if (cmd === 'pause') message = { type: 'player:pause', data: {} };
         else if (cmd === 'seek') message = { type: 'player:setCurrentTime', data: { time: arg } };
-        if (message) playerIframe.contentWindow.postMessage(JSON.stringify(message), '*');
+        if (message) {
+          try {
+            playerIframe.contentWindow.postMessage(JSON.stringify(message), '*');
+          } catch (_) {}
+        }
       }
 
       function playPlayer() {
@@ -965,8 +1013,6 @@
       }
 
       function seekPlayer(seconds) {
-        // НИКОГДА не перематываем плеер до того, как он впервые запустил воспроизведение!
-        // Вызов setCurrentTime на стартовом экране Rutube ломает его HLS-загрузчик и вешает бесконечный спиннер.
         if (!hasVideoStartedOnce) return;
         const target = Math.max(0, Number(seconds) || 0);
         playerCommand('seek', target);
@@ -974,14 +1020,19 @@
 
       // --- Загрузка видео в плеер ---
       function loadEmbedVideo(embedUrl, options = {}) {
-        const { isRemote = false, initialTime = 0, initialState = 'paused' } = options;
+        const { isRemote = false, initialTime = 0, initialState = 'paused', forceReload = false } = options;
         if (!embedUrl) return;
 
         clearSenderHoldTimer();
         clearPauseEnforceTimers();
-        lockRemoteAction(600);
+        lockRemoteAction(800);
 
-        const isSameUrl = currentEmbedUrl === embedUrl && playerIframe.src === embedUrl;
+        // Кэшируем видео для текущей комнаты в sessionStorage
+        if (roomId) {
+          try { sessionStorage.setItem('wp_video_' + roomId, embedUrl); } catch (_) {}
+        }
+
+        const isSameUrl = !forceReload && currentEmbedUrl === embedUrl && playerIframe && playerIframe.src === embedUrl;
         currentEmbedUrl = embedUrl;
 
         const targetState = normalizePlayerState(initialState) || 'paused';
@@ -1001,7 +1052,7 @@
           videoUrlInput.value = embedUrl;
         }
 
-        if (!hasVideoStartedOnce && (targetTime > 0.5 || targetState === 'playing')) {
+        if (targetTime > 0.5 || targetState === 'playing') {
           pendingInitSync = {
             time: targetTime,
             state: targetState,
@@ -1009,7 +1060,7 @@
           };
           updateTelemetryUI();
           addLog(
-            `Видео загружено (${formatTimecode(targetTime)}). Нажмите Play на плеере, чтобы подключиться к просмотру!`,
+            `Видео готово (${formatTimecode(targetTime)}). Нажмите Play в центре плеера для синхронного просмотра!`,
             'sync'
           );
         } else {
@@ -1017,35 +1068,42 @@
           updateTelemetryUI();
           addLog(
             isRemote
-              ? `Загружено видео по сети: ${embedUrl}`
+              ? `Загружено видео: ${embedUrl}`
               : `Видео загружено для всех: ${embedUrl}`,
             'sync'
           );
         }
       }
 
-      // Вызывается в момент, когда пользователь впервые запустил плеер Rutube (разблокировал автоплей и инициализировал HLS)
+      // Вызывается в момент, когда пользователь впервые запустил плеер (разблокировал автоплей)
       function applyPendingInitSyncOnFirstPlay() {
         if (!pendingInitSync) return;
         const syncState = pendingInitSync.state || 'playing';
         const syncTime = getPendingSyncLiveTime();
         pendingInitSync = null;
 
-        // Даем 250 мс декодеру Rutube завершить инициализацию первого кадра, затем перематываем к комнате
-        lockRemoteAction(1200);
+        // Блокируем входящие эхо и фоновые маяки на 3.5 секунды, пока плеер инициализирует и подгружает буфер
+        lockRemoteAction(3500);
+        isInitialSyncing = true;
+        setTimeout(() => { isInitialSyncing = false; }, 3500);
+
+        // Даем 300 мс плееру инициализировать первый HLS-кадр, затем перематываем один раз без шторма
         setTimeout(() => {
-          applyRemoteSyncCommand({
-            action: 'force-sync',
-            state: syncState,
-            time: syncTime,
-            force: true
-          });
-          // Дополнительно запрашиваем свежий маяк у комнаты для идеальной точности
-          sendNetworkMessage({
-            type: 'request-beacon',
-            embedUrl: currentEmbedUrl
-          });
-        }, 250);
+          if (syncTime > 1.0) {
+            seekPlayer(syncTime);
+            localCurrentTime = syncTime;
+            lastTimeUpdateWallClock = Date.now();
+          }
+          if (syncState === 'playing') {
+            localState = 'playing';
+            playPlayer();
+          } else {
+            localState = 'paused';
+            pausePlayer();
+          }
+          updateTelemetryUI();
+          addLog(`Синхронизировано с комнатой на ${formatTimecode(syncTime)} (${syncState === 'playing' ? 'Играет' : 'Пауза'})`, 'sync');
+        }, 300);
       }
 
       // --- Применение входящей команды синхронизации ---
@@ -1176,7 +1234,7 @@
         }
       }
 
-      // --- Авто-коррекция рассинхрона по маяку времени (после подгрузки или накопления задержки) ---
+      // --- Авто-коррекция рассинхрона по маяку времени ---
       function handleIncomingTimeBeacon(payload) {
         if (!currentEmbedUrl || payload.embedUrl !== currentEmbedUrl) return;
 
@@ -1184,8 +1242,7 @@
         const remoteTime = payload.time;
         if (typeof remoteTime !== 'number' || isNaN(remoteTime)) return;
 
-        // Если наш плеер еще не запущен пользователем после входа/обновления страницы —
-        // просто обновляем целевую точку синхронизации в памяти, НЕ дергая setCurrentTime!
+        // Если наш плеер еще не запущен пользователем — обновляем целевую точку в памяти
         if (!hasVideoStartedOnce) {
           pendingInitSync = {
             time: remoteTime,
@@ -1196,39 +1253,41 @@
           return;
         }
 
-        // Если мы сами запросили принудительное выравнивание с комнатой (urgent) и в комнате стоит пауза
-        if (payload.urgent && beaconState === 'paused') {
-          applyRemoteSyncCommand({
-            action: 'force-sync',
-            state: 'paused',
-            time: remoteTime,
-            force: true
-          });
+        // Если прямо сейчас идет первичная синхронизация буфера после первого запуска — игнорируем маяки
+        if (isInitialSyncing) return;
+
+        // 1. Срочный ответ по запросу пользователя (кнопка "Синхронизировать меня с комнатой" или после буферизации)
+        if (payload.urgent) {
+          consecutiveDriftCount = 0;
+          lockRemoteAction(2500);
+          isInitialSyncing = true;
+          setTimeout(() => { isInitialSyncing = false; }, 3000);
+
+          localCurrentTime = remoteTime;
+          lastTimeUpdateWallClock = Date.now();
+          seekPlayer(remoteTime);
+
+          if (beaconState === 'playing') {
+            localState = 'playing';
+            playPlayer();
+          } else {
+            localState = 'paused';
+            pausePlayer();
+          }
+          updateTelemetryUI();
+          addLog(`Синхронизировано с комнатой: ${formatTimecode(remoteTime)} (${beaconState === 'playing' ? 'Играет' : 'Пауза'})`, 'sync');
           return;
         }
 
+        // 2. Фоновый контроль плавного дрейфа времени во время воспроизведения
         if (localState !== 'playing' || beaconState !== 'playing') return;
         if (isRemoteAction || isLocalBuffering || senderHoldTimer) return;
-        if (Date.now() - lastManualSyncAt < 2500 && !payload.urgent) return;
+        if (Date.now() - lastManualSyncAt < 2500) return;
 
         const myLiveTime = getLiveCurrentTime();
         const drift = Math.abs(remoteTime - myLiveTime);
 
-        // 1. Если это срочный ответ после подгрузки буфера или кнопки "Синхронизировать меня"
-        if (payload.urgent && drift >= BUFFER_RECOVERY_DIFF) {
-          consecutiveDriftCount = 0;
-          const targetTime = remoteTime + PLAY_SEEK_LEAD_SEC;
-          lockRemoteAction(850);
-          seekPlayer(targetTime);
-          playPlayer();
-          localCurrentTime = targetTime;
-          lastTimeUpdateWallClock = Date.now();
-          updateTelemetryUI();
-          addLog(`Догон таймкода комнаты (${formatTimecode(targetTime)})`, 'sync');
-          return;
-        }
-
-        // 2. Плавный контроль накопленной со временем задержки (если 2 маяка подряд расхождение >= 1.15 сек)
+        // Плавный контроль накопленной со временем задержки (если 2 маяка подряд расхождение >= 1.15 сек)
         if (drift >= DRIFT_BEACON_THRESHOLD && drift < 300) {
           consecutiveDriftCount++;
           if (consecutiveDriftCount >= 2) {
@@ -1247,29 +1306,52 @@
         }
       }
 
-      // --- Обработка событий от Rutube Iframe через window.addEventListener('message') ---
+      // --- Обработка postMessage событий от iframe плеера (Rutube и VK Видео) ---
       window.addEventListener('message', (event) => {
-        if (currentProvider !== 'rutube' || !event.data) return;
-        if (typeof event.origin === 'string' && event.origin.indexOf('rutube') === -1) return;
+        if (!event.data) return;
 
-        let message;
-        try {
-          message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-        } catch (_) {
+        // 1. Прямые postMessage события от VK Видео (согласно API videoplayer.js)
+        if (currentProvider === 'vk') {
+          let vkData = event.data;
+          if (typeof vkData === 'string') {
+            try { vkData = JSON.parse(vkData); } catch (_) {}
+          }
+          if (vkData && typeof vkData.event === 'string') {
+            const ev = vkData.event.toLowerCase();
+            if (ev === 'started' || ev === 'resumed') {
+              handlePlayerStateChange('playing');
+            } else if (ev === 'paused') {
+              handlePlayerStateChange('paused');
+            } else if (ev === 'timeupdate' && typeof vkData.time === 'number') {
+              handlePlayerTimeUpdate(vkData.time);
+            } else if (ev === 'ended') {
+              handlePlayerStateChange('ended');
+            }
+          }
           return;
         }
 
-        if (!message || typeof message.type !== 'string') return;
+        // 2. События Rutube
+        if (currentProvider === 'rutube') {
+          let message;
+          try {
+            message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+          } catch (_) {
+            return;
+          }
 
-        // 1. Текущее время плеера
-        if (message.type === 'player:currentTime' && message.data && typeof message.data.time === 'number') {
-          handlePlayerTimeUpdate(message.data.time);
-          return;
-        }
+          if (!message || typeof message.type !== 'string') return;
 
-        // 2. Смена статуса плеера
-        if (message.type === 'player:changeState' && message.data) {
-          handlePlayerStateChange(message.data.state);
+          // 1. Текущее время плеера Rutube
+          if (message.type === 'player:currentTime' && message.data && typeof message.data.time === 'number') {
+            handlePlayerTimeUpdate(message.data.time);
+            return;
+          }
+
+          // 2. Смена статуса плеера Rutube
+          if (message.type === 'player:changeState' && message.data) {
+            handlePlayerStateChange(message.data.state);
+          }
         }
       });
 
@@ -1540,7 +1622,8 @@
           }
 
           if (data.action === 'join' || data.action === 'request-state') {
-            if (isHost || (currentEmbedUrl && hasVideoStartedOnce)) {
+            // Любой участник с известным видео делится текущим состоянием комнаты
+            if (currentEmbedUrl) {
               sendNetworkMessage({
                 type: 'welcome',
                 targetId: data.senderId,
@@ -1556,7 +1639,7 @@
 
         // Запрос маяка времени (после подгрузки буфера или кнопки "Синхронизировать меня с комнатой")
         if (data.type === 'request-beacon') {
-          if (currentEmbedUrl && (isHost || hasVideoStartedOnce) && !isLocalBuffering && !isRemoteAction) {
+          if (currentEmbedUrl && !isLocalBuffering && !isRemoteAction) {
             sendNetworkMessage({
               type: 'time-beacon',
               embedUrl: currentEmbedUrl,
@@ -1626,16 +1709,16 @@
         startPeerInstance();
         initWssPool();
 
-        // Быстрый повтор рукопожатия для Гостя, пока он не получит ответ от комнаты
+        // Повторяем запрос статуса комнаты, пока видео не подтверждено и плеер не активен
         const joinHandshakeInterval = setInterval(() => {
-          if (isHost || guestConnectedToRoom) {
+          if (currentEmbedUrl && hasVideoStartedOnce) {
             clearInterval(joinHandshakeInterval);
             return;
           }
           sendNetworkMessage({
             type: 'presence',
-            action: 'join',
-            role: 'guest'
+            action: currentEmbedUrl ? 'join' : 'request-state',
+            role: isHost ? 'host' : 'guest'
           });
         }, 2200);
 
@@ -1998,7 +2081,7 @@
           return;
         }
 
-        loadEmbedVideo(embedUrl, { isRemote: false, initialTime: 0, initialState: 'paused' });
+        loadEmbedVideo(embedUrl, { isRemote: false, initialTime: 0, initialState: 'paused', forceReload: true });
 
         sendNetworkMessage({
           type: 'load-video',
@@ -2053,19 +2136,35 @@
 
       pullSyncBtn.addEventListener('click', () => {
         if (!currentEmbedUrl) {
-          addLog('Видео в комнате ещё не выбрано', 'warn');
+          addLog('Запрос текущего видео и состояния у комнаты...', 'info');
+          sendNetworkMessage({
+            type: 'presence',
+            action: 'request-state',
+            role: isHost ? 'host' : 'guest'
+          });
           return;
         }
-        if (!hasVideoStartedOnce) {
-          addLog('Нажмите кнопку Play в центре плеера — видео сразу перемотается к таймкоду комнаты!', 'warn');
-          return;
-        }
-        addLog('Запрос текущего таймкода у комнаты...', 'info');
+
+        addLog('Запрос точного таймкода комнаты...', 'info');
         sendNetworkMessage({
           type: 'request-beacon',
           embedUrl: currentEmbedUrl
         });
+
+        // Если плеер еще не запускался, пробуем запустить
+        if (!hasVideoStartedOnce) {
+          playPlayer();
+          addLog('Если видео не запустилось автоматически, нажмите Play в самом плеере', 'info');
+        }
       });
+
+      // Восстанавливаем видео из кэша комнаты в sessionStorage (для мгновенного открытия после F5)
+      const cachedVideoForRoom = (function() {
+        try { return sessionStorage.getItem('wp_video_' + roomId); } catch (_) { return null; }
+      })();
+      if (cachedVideoForRoom) {
+        loadEmbedVideo(cachedVideoForRoom, { isRemote: true, initialTime: 0, initialState: 'paused' });
+      }
 
       // Запуск приложения
       initPeerNetwork();
