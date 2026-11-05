@@ -492,7 +492,7 @@
       const PLAY_SEEK_LEAD_SEC = 0.60;     // Компенсация буферизации при перемотке во время игры
       const SENDER_START_HOLD_MS = 400;    // Микро-удержание теплого плеера при старте воспроизведения
 
-      // Конфигурация STUN + TURN серверов для обхода NAT и VPN в WebRTC (PeerJS)
+      // Конфигурация STUN серверов для обхода NAT и VPN в WebRTC (PeerJS)
       const PEERJS_CONFIG = {
         debug: 0,
         config: {
@@ -501,27 +501,23 @@
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
             { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' },
             { urls: 'stun:stun.cloudflare.com:3478' },
-            {
-              urls: [
-                'turn:openrelay.metered.ca:80',
-                'turn:openrelay.metered.ca:443',
-                'turn:openrelay.metered.ca:443?transport=tcp',
-                'turns:openrelay.metered.ca:443?transport=tcp'
-              ],
-              username: 'openrelayproject',
-              credential: 'openrelayproject'
-            }
+            { urls: 'stun:stun.services.mozilla.com' },
+            { urls: 'stun:stun.sipgate.net' }
           ]
         }
       };
 
-      // Параллельный пул WSS-брокеров (MQTT over WebSockets на портах 443/8084/8884),
-      // обеспечивающий мгновенную доставку команд даже если VPN блокирует WebRTC/UDP
+      // Параллельный пул WSS-брокеров (MQTT over WebSockets):
+      // 1. iot.coreflux.cloud:443 - стандартный порт HTTPS 443 (пробивает любые VPN и фаерволы)
+      // 2. broker.emqx.io:8084    - глобальный кластер EMQX
+      // 3. mqtt.tyckr.io:8081     - независимый открытый брокер
       const WSS_BROKERS = [
-        'wss://mqtt.eclipseprojects.io:443/mqtt',
+        'wss://iot.coreflux.cloud:443/mqtt',
         'wss://broker.emqx.io:8084/mqtt',
-        'wss://broker.hivemq.com:8884/mqtt'
+        'wss://mqtt.tyckr.io:8081'
       ];
 
       // --- DOM элементы ---
@@ -1624,16 +1620,23 @@
           markGuestConnected();
         }
 
-        // Ретрансляция Хостом по WebRTC другим гостям
-        if (
-          isHost &&
-          webrtcSenderPeerId &&
-          (data.type === 'sync' ||
+        // Полная ретрансляция и мост Хоста между WebRTC и WSS:
+        // 1. Сообщение гостя по WebRTC -> пересылаем другим WebRTC гостям И в WSS
+        // 2. Сообщение гостя по WSS -> пересылаем всем WebRTC гостям!
+        if (isHost) {
+          if (
+            data.type === 'sync' ||
             data.type === 'load-video' ||
             data.type === 'time-beacon' ||
-            data.type === 'request-beacon')
-        ) {
-          broadcastFromHostWebRTC(data, webrtcSenderPeerId);
+            data.type === 'request-beacon'
+          ) {
+            if (webrtcSenderPeerId) {
+              broadcastFromHostWebRTC(data, webrtcSenderPeerId);
+              publishWssMessage(data);
+            } else {
+              broadcastFromHostWebRTC(data);
+            }
+          }
         }
 
         // Обработка присутствия и рукопожатия комнаты
@@ -1701,6 +1704,17 @@
                 receivedAt: Date.now()
               };
               updateTelemetryUI();
+            } else if (hasVideoStartedOnce && typeof data.time === 'number') {
+              const diff = Math.abs(data.time - getLiveCurrentTime());
+              if (diff >= SYNC_THRESHOLD_SEC || data.state !== localState) {
+                applyRemoteSyncCommand({
+                  action: 'force-sync',
+                  time: data.time,
+                  state: data.state || 'paused',
+                  embedUrl: data.embedUrl,
+                  force: true
+                });
+              }
             }
           }
           return;
@@ -1746,7 +1760,7 @@
           });
         }, 2200);
 
-        // Периодический heartbeat присутствия
+        // Периодический heartbeat присутствия + авто-восстановление WebRTC у гостя
         setInterval(() => {
           sendNetworkMessage({
             type: 'presence',
@@ -1754,7 +1768,24 @@
             role: isHost ? 'host' : 'guest'
           });
           refreshPeerCountUI();
+
+          // Фоновый контроль живучести WebRTC соединения у гостя
+          if (!isHost && (!hostConnection || !hostConnection.open)) {
+            if (peer && !peer.destroyed && peer.open) {
+              connectToHostWebRTC(roomId);
+            }
+          }
         }, 8000);
+
+        // Фоновый контроль живучести WSS-пула брокеров
+        setInterval(() => {
+          WSS_BROKERS.forEach((url) => {
+            const entry = wssPool.get(url);
+            if (!entry || (!entry.connected && (!entry.socket || entry.socket.readyState === WebSocket.CLOSED))) {
+              connectSingleWssBroker(url);
+            }
+          });
+        }, 12000);
 
         // Периодический маяк времени от Хоста (каждые 4.5 сек во время воспроизведения),
         // чтобы у друзей не накапливалась задержка со временем и компенсировались микрофризы
@@ -1851,19 +1882,32 @@
             return;
           }
 
-          if (!isHost && (errType === 'peer-unavailable' || errType === 'network' || errType === 'webrtc')) {
-            if (!guestConnectedToRoom && peerRetryCount < 6) {
-              peerRetryCount++;
-              clearTimeout(peerRetryTimer);
-              peerRetryTimer = setTimeout(() => connectToHostWebRTC(roomId), 3000);
+          if (!isHost) {
+            if (errType === 'peer-unavailable' || errType === 'network' || errType === 'webrtc') {
+              scheduleWebRtcReconnect(roomId);
+              return;
             }
-            return;
+            if (errType === 'server-error' || errType === 'socket-error' || errType === 'socket-closed') {
+              setTimeout(() => startPeerInstance(), 3500);
+              return;
+            }
           }
         });
       }
 
+      function scheduleWebRtcReconnect(targetRoomId) {
+        if (isHost) return;
+        clearTimeout(peerRetryTimer);
+        peerRetryTimer = setTimeout(() => {
+          if (!hostConnection || !hostConnection.open) {
+            connectToHostWebRTC(targetRoomId);
+          }
+        }, 3500);
+      }
+
       function connectToHostWebRTC(targetRoomId) {
         if (!peer || peer.destroyed || !peer.open) return;
+        if (hostConnection && hostConnection.open) return;
 
         try {
           hostConnection = peer.connect(targetRoomId, {
@@ -1871,10 +1915,14 @@
             serialization: 'json'
           });
         } catch (_) {
+          scheduleWebRtcReconnect(targetRoomId);
           return;
         }
 
-        if (!hostConnection) return;
+        if (!hostConnection) {
+          scheduleWebRtcReconnect(targetRoomId);
+          return;
+        }
 
         hostConnection.on('open', () => {
           markGuestConnected();
@@ -1890,10 +1938,17 @@
         });
 
         hostConnection.on('close', () => {
+          hostConnection = null;
           if (!hasAnyOpenWss()) {
             guestConnectedToRoom = false;
             setConnectionStatus('Переподключение...', 'waiting');
           }
+          scheduleWebRtcReconnect(targetRoomId);
+        });
+
+        hostConnection.on('error', () => {
+          hostConnection = null;
+          scheduleWebRtcReconnect(targetRoomId);
         });
       }
 
@@ -1958,12 +2013,23 @@
       }
 
       function connectSingleWssBroker(brokerUrl) {
+        const existing = wssPool.get(brokerUrl);
+        if (existing) {
+          if (existing.pingTimer) {
+            clearInterval(existing.pingTimer);
+            existing.pingTimer = null;
+          }
+          if (existing.socket && (existing.socket.readyState === WebSocket.OPEN || existing.socket.readyState === WebSocket.CONNECTING)) {
+            try { existing.socket.close(); } catch (_) {}
+          }
+        }
+
         let ws;
         try {
           ws = new WebSocket(brokerUrl, 'mqtt');
           ws.binaryType = 'arraybuffer';
         } catch (_) {
-          setTimeout(() => connectSingleWssBroker(brokerUrl), 5000);
+          setTimeout(() => connectSingleWssBroker(brokerUrl), 4000);
           return;
         }
 
@@ -2092,6 +2158,9 @@
       newRoomBtn.addEventListener('click', () => {
         const freshRoomId = generateShortId('wp');
         sessionStorage.setItem('wp_host_room', freshRoomId);
+        if (currentEmbedUrl) {
+          try { sessionStorage.setItem('wp_video_' + freshRoomId, currentEmbedUrl); } catch (_) {}
+        }
         window.location.href = `${window.location.pathname}?room=${encodeURIComponent(freshRoomId)}`;
       });
 
