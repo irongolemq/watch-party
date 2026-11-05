@@ -554,6 +554,7 @@
       let seekBroadcastTimer = null;
       let senderHoldTimer = null;          // Таймер микро-удержания при старте воспроизведения
       let pauseEnforceTimers = [];         // Таймеры повторного подтверждения паузы после перемотки
+      let pauseLockUntil = 0;              // Временная метка, до которой блокируются ложные авто-плей события плеера после перемотки/паузы
       let lastStateBroadcastAt = 0;
       let lastBroadcastedState = '';
       let lastManualSyncAt = 0;            // Время последней явной синхронизации (чтобы маяк не мешал)
@@ -670,7 +671,27 @@
         }
       }
 
-      // Микро-удержание локального плеера при нажатии Play / Force Sync,
+      // Фиксация паузы лесенкой таймеров (защита от самовольного автоплея iframe Rutube и VK Видео после seek)
+      function enforcePauseLadder(durationMs = 1500) {
+        clearPauseEnforceTimers();
+        clearSenderHoldTimer();
+        pauseLockUntil = Math.max(pauseLockUntil, Date.now() + durationMs);
+        pausePlayer();
+        const steps = [100, 250, 450, 750, 1100, 1500];
+        steps.forEach((delay) => {
+          if (delay <= durationMs) {
+            pauseEnforceTimers.push(
+              setTimeout(() => {
+                if (localState === 'paused') {
+                  pausePlayer();
+                }
+              }, delay)
+            );
+          }
+        });
+      }
+
+      // Микро-удержание локального плеера при старте воспроизведения,
       // чтобы за время полета сетевого пакета оба плеера стартовали одновременно
       function holdLocalPlayerForCoordinatedStart(holdMs = SENDER_START_HOLD_MS) {
         clearSenderHoldTimer();
@@ -679,7 +700,7 @@
         playerCommand('pause');
         senderHoldTimer = setTimeout(() => {
           senderHoldTimer = null;
-          if (localState === 'playing') {
+          if (localState === 'playing' && Date.now() >= pauseLockUntil) {
             lockRemoteAction(450);
             playerCommand('play');
           }
@@ -1025,6 +1046,7 @@
 
         clearSenderHoldTimer();
         clearPauseEnforceTimers();
+        pauseLockUntil = 0;
         lockRemoteAction(800);
 
         // Кэшируем видео для текущей комнаты в sessionStorage
@@ -1099,7 +1121,7 @@
             playPlayer();
           } else {
             localState = 'paused';
-            pausePlayer();
+            enforcePauseLadder(1800);
           }
           updateTelemetryUI();
           addLog(`Синхронизировано с комнатой на ${formatTimecode(syncTime)} (${syncState === 'playing' ? 'Играет' : 'Пауза'})`, 'sync');
@@ -1162,26 +1184,11 @@
           }
 
           if (didPauseSeek) {
-            // Даем плееру 110 мс подгрузить кадр после seek, затем фиксируем паузу
-            lockRemoteAction(1050);
-            pauseEnforceTimers.push(
-              setTimeout(() => {
-                if (localState === 'paused') pausePlayer();
-              }, 110),
-              setTimeout(() => {
-                if (localState === 'paused') pausePlayer();
-              }, 280),
-              setTimeout(() => {
-                if (localState === 'paused') pausePlayer();
-              }, 480)
-            );
+            lockRemoteAction(1600);
+            enforcePauseLadder(1600);
           } else {
-            pausePlayer();
-            pauseEnforceTimers.push(
-              setTimeout(() => {
-                if (localState === 'paused') pausePlayer();
-              }, 150)
-            );
+            lockRemoteAction(800);
+            enforcePauseLadder(800);
           }
         } else if (state === 'playing') {
           localState = 'playing';
@@ -1272,7 +1279,7 @@
             playPlayer();
           } else {
             localState = 'paused';
-            pausePlayer();
+            enforcePauseLadder(2000);
           }
           updateTelemetryUI();
           addLog(`Синхронизировано с комнатой: ${formatTimecode(remoteTime)} (${beaconState === 'playing' ? 'Играет' : 'Пауза'})`, 'sync');
@@ -1281,7 +1288,7 @@
 
         // 2. Фоновый контроль плавного дрейфа времени во время воспроизведения
         if (localState !== 'playing' || beaconState !== 'playing') return;
-        if (isRemoteAction || isLocalBuffering || senderHoldTimer) return;
+        if (isRemoteAction || isLocalBuffering || senderHoldTimer || Date.now() < pauseLockUntil) return;
         if (Date.now() - lastManualSyncAt < 2500) return;
 
         const myLiveTime = getLiveCurrentTime();
@@ -1375,32 +1382,38 @@
             }
           }
 
-          // Если время плавно идет вперед вне удаленной команды — плеер в режиме воспроизведения
-          if (hasVideoStartedOnce && !isRemoteAction && elapsedWallSec > 0.05 && elapsedWallSec < 1.2) {
+          // Если комната на паузе, но плеер самовольно пытается играть (артефакт буферизации/seek в Rutube/VK):
+          if (localState === 'paused' && hasVideoStartedOnce) {
+            const forwardStep = newTime - prevTime;
+            if (forwardStep > 0.08 && forwardStep < 3.0 && elapsedWallSec > 0.05 && elapsedWallSec < 1.5) {
+              pausePlayer();
+            }
+          }
+
+          // Если плеер в режиме воспроизведения и вышел из состояния буферизации
+          if (localState === 'playing' && isLocalBuffering && elapsedWallSec > 0.05 && elapsedWallSec < 1.2) {
             const forwardStep = newTime - prevTime;
             if (forwardStep > 0.05 && forwardStep < 1.5) {
-              if (localState !== 'playing') {
-                localState = 'playing';
-              }
-              if (isLocalBuffering) {
-                isLocalBuffering = false;
-                sendNetworkMessage({
-                  type: 'request-beacon',
-                  embedUrl: currentEmbedUrl
-                });
-              }
+              isLocalBuffering = false;
+              sendNetworkMessage({
+                type: 'request-beacon',
+                embedUrl: currentEmbedUrl
+              });
             }
           }
 
           updateTelemetryUI();
 
           // Детектируем ручную перемотку ползунка пользователем внутри iframe
-          if (hasVideoStartedOnce && !isRemoteAction && elapsedWallSec > 0 && elapsedWallSec < 5) {
+          if (hasVideoStartedOnce && !isRemoteAction && Date.now() >= pauseLockUntil && elapsedWallSec > 0 && elapsedWallSec < 5) {
             const expectedDelta = localState === 'playing' ? elapsedWallSec : 0;
             const actualDelta = Math.abs(newTime - prevTime);
             const drift = Math.abs(actualDelta - expectedDelta);
 
             if (drift >= 2.2) {
+              if (localState === 'paused') {
+                enforcePauseLadder(1200);
+              }
               if (seekBroadcastTimer) clearTimeout(seekBroadcastTimer);
               seekBroadcastTimer = setTimeout(() => {
                 if (!isRemoteAction) {
@@ -1476,9 +1489,19 @@
 
           isLocalBuffering = false;
 
-          // Если событие вызвано программным переключением (или микро-удержанием старта) — игнорируем
-          if (isRemoteAction) {
-            return;
+          // Защита от авто-воспроизведения (шторма событий после seek/buffering iframe) во время паузы
+          if (normalizedState === 'playing') {
+            if (isRemoteAction || Date.now() < pauseLockUntil) {
+              if (localState === 'paused') {
+                pausePlayer();
+              }
+              return;
+            }
+          } else if (normalizedState === 'paused') {
+            clearSenderHoldTimer();
+            if (isRemoteAction) {
+              return;
+            }
           }
 
           const now = Date.now();
@@ -1517,6 +1540,7 @@
             }
           } else {
             clearSenderHoldTimer();
+            enforcePauseLadder(800);
             addLog(`Вы поставили паузу на ${tc}`, 'info');
           }
       }
@@ -1639,7 +1663,7 @@
 
         // Запрос маяка времени (после подгрузки буфера или кнопки "Синхронизировать меня с комнатой")
         if (data.type === 'request-beacon') {
-          if (currentEmbedUrl && !isLocalBuffering && !isRemoteAction) {
+          if (currentEmbedUrl && !isLocalBuffering) {
             sendNetworkMessage({
               type: 'time-beacon',
               embedUrl: currentEmbedUrl,
@@ -2130,7 +2154,9 @@
         });
 
         if (localState === 'playing') {
-          holdLocalPlayerForCoordinatedStart(450);
+          // Не дергаем плеер паузой, если видео уже плавно играет у инициатора
+        } else {
+          enforcePauseLadder(800);
         }
       });
 
