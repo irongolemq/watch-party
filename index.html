@@ -3,24 +3,36 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Watch Party — Rutube + VK Видео</title>
+  <title>Watch Party — Совместный просмотр Rutube и VK Видео</title>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
     :root {
-      --bg-primary: #0b0e14;
-      --bg-secondary: #131822;
-      --bg-tertiary: #1c2331;
-      --border-color: #263042;
-      --text-primary: #f0f4f8;
-      --text-secondary: #94a3b8;
-      --text-muted: #64748b;
-      --accent: #00a8e8;
-      --accent-hover: #0090c7;
-      --accent-glow: rgba(0, 168, 232, 0.2);
-      --success: #10b981;
-      --warning: #f59e0b;
-      --danger: #ef4444;
-      --radius: 10px;
+      --bg-page: #09090b;
+      --bg-surface: #121215;
+      --bg-elevated: #18181c;
+      --bg-hover: #222228;
+      --border: #27272a;
+      --border-subtle: #1f1f23;
+      --text-primary: #fafafa;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --accent-primary: #f4f4f5;
+      --accent-primary-text: #09090b;
+      --blue: #3b82f6;
+      --blue-bg: rgba(59, 130, 246, 0.12);
+      --blue-border: rgba(59, 130, 246, 0.3);
+      --green: #22c55e;
+      --green-bg: rgba(34, 197, 94, 0.12);
+      --green-border: rgba(34, 197, 94, 0.28);
+      --amber: #f59e0b;
+      --amber-bg: rgba(245, 158, 11, 0.12);
+      --amber-border: rgba(245, 158, 11, 0.28);
+      --red: #ef4444;
+      --red-bg: rgba(239, 68, 68, 0.12);
+      --red-border: rgba(239, 68, 68, 0.28);
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
     }
 
     * {
@@ -30,39 +42,35 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Helvetica, Arial, sans-serif;
-      background-color: var(--bg-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-page);
       color: var(--text-primary);
       min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      line-height: 1.5;
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
     }
 
-    .app-container {
-      width: 100%;
-      max-width: 1200px;
+    .app-shell {
+      max-width: 1440px;
       margin: 0 auto;
-      padding: 16px;
+      padding: 16px 20px 28px;
       display: flex;
       flex-direction: column;
       gap: 16px;
-      flex: 1;
     }
 
-    /* Верхняя панель */
-    .top-panel {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius);
-      padding: 14px 18px;
+    /* Верхняя панель навигации и загрузки видео */
+    .topbar {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 12px 16px;
       display: flex;
       flex-direction: column;
       gap: 12px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
     }
 
-    .top-row {
+    .topbar-main {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -70,123 +78,163 @@
       gap: 12px;
     }
 
-    .brand-and-status {
+    .brand-group {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
     }
 
-    .brand {
-      font-weight: 700;
-      font-size: 1.1rem;
-      letter-spacing: -0.02em;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+    .brand-title {
+      font-size: 0.98rem;
+      font-weight: 600;
       color: var(--text-primary);
-    }
-
-    .brand-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 10px var(--accent);
-    }
-
-    .status-badges {
+      letter-spacing: -0.01em;
       display: flex;
-      flex-wrap: wrap;
       align-items: center;
       gap: 8px;
     }
 
-    .badge {
+    .brand-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      background: var(--text-primary);
+      color: var(--bg-page);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+
+    .divider-v {
+      width: 1px;
+      height: 18px;
+      background: var(--border);
+    }
+
+    .status-pill {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 5px 11px;
-      border-radius: 999px;
-      font-size: 0.82rem;
-      font-weight: 600;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 0.78rem;
+      font-weight: 500;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
       color: var(--text-secondary);
     }
 
-    .status-indicator {
-      width: 8px;
-      height: 8px;
+    .status-dot {
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
-      background: var(--warning);
-      transition: background-color 0.25s ease;
+      background: var(--amber);
     }
 
-    .status-indicator.online {
-      background: var(--success);
-      box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+    .status-dot.online {
+      background: var(--green);
     }
 
-    .status-indicator.error {
-      background: var(--danger);
+    .status-dot.error {
+      background: var(--red);
     }
 
-    .top-actions {
+    .room-code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+    }
+
+    .topbar-controls {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       gap: 8px;
     }
 
-    .url-bar {
+    .name-field {
+      display: inline-flex;
+      align-items: center;
+      background: var(--bg-page);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0 8px;
+      height: 34px;
+      gap: 6px;
+    }
+
+    .name-field label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .name-input {
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-weight: 500;
+      width: 110px;
+      outline: none;
+    }
+
+    .url-row {
       display: flex;
-      gap: 10px;
+      gap: 8px;
       width: 100%;
     }
 
-    .input-url {
+    .input-text {
       flex: 1;
-      background: var(--bg-primary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 10px 14px;
+      background: var(--bg-page);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 12px;
       color: var(--text-primary);
-      font-size: 0.92rem;
+      font-size: 0.86rem;
       outline: none;
-      transition: border-color 0.2s, box-shadow 0.2s;
+      transition: border-color 0.15s ease;
     }
 
-    .input-url::placeholder {
+    .input-text::placeholder {
       color: var(--text-muted);
     }
 
-    .input-url:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-glow);
+    .input-text:focus {
+      border-color: #52525b;
     }
 
+    /* Кнопки */
     .btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      background: var(--bg-tertiary);
+      gap: 6px;
+      height: 34px;
+      padding: 0 12px;
+      border-radius: var(--radius-sm);
+      font-size: 0.82rem;
+      font-weight: 500;
+      background: var(--bg-elevated);
       color: var(--text-primary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 9px 16px;
-      font-size: 0.88rem;
-      font-weight: 600;
+      border: 1px solid var(--border);
       cursor: pointer;
-      transition: all 0.18s ease;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
       white-space: nowrap;
       user-select: none;
     }
 
     .btn:hover:not(:disabled) {
-      background: #252f42;
-      border-color: #38465f;
+      background: var(--bg-hover);
+      border-color: #3f3f46;
     }
 
     .btn:active:not(:disabled) {
@@ -194,51 +242,65 @@
     }
 
     .btn:disabled {
-      opacity: 0.5;
+      opacity: 0.45;
       cursor: not-allowed;
     }
 
-    .btn-primary {
-      background: var(--accent);
-      border-color: var(--accent);
-      color: #fff;
+    .btn-solid {
+      background: var(--accent-primary);
+      color: var(--accent-primary-text);
+      border-color: var(--accent-primary);
+      font-weight: 600;
     }
 
-    .btn-primary:hover:not(:disabled) {
-      background: var(--accent-hover);
-      border-color: var(--accent-hover);
+    .btn-solid:hover:not(:disabled) {
+      background: #e4e4e7;
+      border-color: #e4e4e7;
     }
 
-    .btn-sync {
-      background: rgba(0, 168, 232, 0.14);
-      border-color: rgba(0, 168, 232, 0.4);
-      color: #5ce1e6;
+    .btn-blue {
+      background: var(--blue-bg);
+      color: #60a5fa;
+      border-color: var(--blue-border);
     }
 
-    .btn-sync:hover:not(:disabled) {
-      background: rgba(0, 168, 232, 0.24);
-      border-color: var(--accent);
+    .btn-blue:hover:not(:disabled) {
+      background: rgba(59, 130, 246, 0.2);
+      border-color: rgba(59, 130, 246, 0.5);
     }
 
-    .sync-buttons {
+    .btn-sm {
+      height: 28px;
+      padding: 0 9px;
+      font-size: 0.76rem;
+    }
+
+    /* Основная сетка: Плеер слева, Панель синхронизации и участников справа */
+    .workspace {
+      display: grid;
+      grid-template-columns: 1fr 400px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .player-column {
       display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
     }
 
-    /* Основная часть: Плеер 16:9 */
-    .player-wrapper {
+    .player-frame-wrap {
       position: relative;
       width: 100%;
       aspect-ratio: 16 / 9;
-      background: #05070a;
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius);
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
       overflow: hidden;
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
     }
 
-    .player-wrapper iframe {
+    .player-frame-wrap iframe {
       position: absolute;
       inset: 0;
       width: 100%;
@@ -246,7 +308,7 @@
       border: 0;
     }
 
-    .player-placeholder {
+    .player-empty {
       position: absolute;
       inset: 0;
       display: flex;
@@ -255,45 +317,33 @@
       justify-content: center;
       padding: 24px;
       text-align: center;
-      color: var(--text-secondary);
-      gap: 10px;
+      gap: 8px;
+      background: #0c0c0f;
       pointer-events: none;
     }
 
-    .player-placeholder.hidden {
+    .player-empty.hidden {
       display: none;
     }
 
-    .player-placeholder-icon {
-      font-size: 2.5rem;
-      opacity: 0.7;
-    }
-
-    .player-placeholder-title {
-      font-size: 1.05rem;
+    .player-empty-title {
+      font-size: 0.98rem;
       font-weight: 600;
       color: var(--text-primary);
     }
 
-    .player-placeholder-sub {
-      font-size: 0.86rem;
+    .player-empty-desc {
+      font-size: 0.82rem;
       color: var(--text-muted);
-      max-width: 460px;
+      max-width: 420px;
     }
 
-    /* Нижняя панель */
-    .bottom-panel {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius);
-      padding: 14px 18px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
-    }
-
-    .controls-row {
+    /* Панель управления под плеером */
+    .transport-bar {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 12px 16px;
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -301,182 +351,455 @@
       gap: 12px;
     }
 
-    .player-telemetry {
+    .transport-left {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
-      gap: 12px;
-      font-size: 0.85rem;
-      color: var(--text-secondary);
-      font-variant-numeric: tabular-nums;
+      gap: 8px;
     }
 
-    .telemetry-pill {
-      background: var(--bg-primary);
-      border: 1px solid var(--border-color);
+    .transport-right {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .local-readout {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
       padding: 5px 10px;
-      border-radius: 6px;
-      color: var(--text-primary);
-      font-weight: 600;
+      background: var(--bg-page);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 0.82rem;
     }
 
-    .log-container {
-      background: var(--bg-primary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 10px 12px;
-      height: 150px;
-      overflow-y: auto;
+    .timecode-mono {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 0.8rem;
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    /* Правая колонка: Участники и синхронизация */
+    .sidebar-column {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 14px;
+      min-width: 0;
     }
 
-    .log-entry {
+    .panel-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .panel-title {
+      font-size: 0.86rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .count-badge {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      font-weight: 600;
+      padding: 1px 7px;
+      border-radius: 999px;
+    }
+
+    /* Блок объяснения текущего ориентира синхронизации */
+    .sync-summary-box {
+      padding: 10px 14px;
+      background: var(--bg-page);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sync-target-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 0.79rem;
+    }
+
+    .sync-target-label {
+      color: var(--text-secondary);
+    }
+
+    .sync-target-value {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .auto-sync-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.76rem;
+      color: var(--text-secondary);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .auto-sync-toggle input {
+      accent-color: var(--blue);
+      cursor: pointer;
+    }
+
+    /* Список участников */
+    .participants-list {
+      display: flex;
+      flex-direction: column;
+      divide-y: 1px solid var(--border-subtle);
+      max-height: 380px;
+      overflow-y: auto;
+    }
+
+    .participant-item {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: background-color 0.12s ease;
+    }
+
+    .participant-item:last-child {
+      border-bottom: none;
+    }
+
+    .participant-item.is-target {
+      background: rgba(59, 130, 246, 0.05);
+    }
+
+    .participant-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .participant-identity {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+
+    .participant-name {
+      font-size: 0.84rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 150px;
+    }
+
+    .role-tag {
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .role-tag.host {
+      color: #93c5fd;
+      border-color: var(--blue-border);
+      background: var(--blue-bg);
+    }
+
+    .role-tag.target {
+      color: #86efac;
+      border-color: var(--green-border);
+      background: var(--green-bg);
+    }
+
+    .participant-metrics {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .state-And-time {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .state-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+
+    .state-badge.playing {
+      color: #4ade80;
+      background: var(--green-bg);
+      border-color: var(--green-border);
+    }
+
+    .state-badge.paused {
+      color: #fbbf24;
+      background: var(--amber-bg);
+      border-color: var(--amber-border);
+    }
+
+    .state-badge.unstarted {
+      color: var(--text-muted);
+    }
+
+    .drift-badge {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+      font-size: 0.73rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--bg-page);
+      color: var(--text-secondary);
+    }
+
+    .drift-badge.synced {
+      color: #4ade80;
+      border-color: var(--green-border);
+      background: var(--green-bg);
+    }
+
+    .drift-badge.warn {
+      color: #fbbf24;
+      border-color: var(--amber-border);
+      background: var(--amber-bg);
+    }
+
+    .participant-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Лог событий */
+    .log-list {
+      padding: 10px 14px;
+      height: 170px;
+      overflow-y: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.76rem;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      background: var(--bg-page);
+    }
+
+    .log-item {
       display: flex;
       gap: 8px;
-      line-height: 1.4;
+      line-height: 1.35;
       word-break: break-word;
     }
 
-    .log-time {
+    .log-ts {
       color: var(--text-muted);
       flex-shrink: 0;
     }
 
-    .log-msg {
+    .log-text {
       color: var(--text-secondary);
     }
 
-    .log-entry.info .log-msg {
-      color: var(--text-primary);
+    .log-item.sync .log-text {
+      color: #93c5fd;
     }
 
-    .log-entry.sync .log-msg {
-      color: #5ce1e6;
+    .log-item.peer .log-text {
+      color: #86efac;
     }
 
-    .log-entry.peer .log-msg {
-      color: #34d399;
+    .log-item.warn .log-text {
+      color: #fcd34d;
     }
 
-    .log-entry.warn .log-msg {
-      color: #fbbf24;
+    @media (max-width: 1080px) {
+      .workspace {
+        grid-template-columns: 1fr;
+      }
     }
 
     @media (max-width: 640px) {
-      .app-container {
+      .app-shell {
         padding: 10px;
-        gap: 12px;
       }
-
-      .url-bar {
+      .url-row {
         flex-direction: column;
       }
-
-      .top-actions,
-      .sync-buttons {
-        width: 100%;
-      }
-
-      .controls-row {
+      .transport-bar {
         flex-direction: column;
         align-items: stretch;
       }
-
-      .btn {
+      .transport-left,
+      .transport-right {
         width: 100%;
+        justify-content: space-between;
       }
     }
   </style>
 </head>
 <body>
-  <div class="app-container">
+  <div class="app-shell">
     <!-- Верхняя панель -->
-    <header class="top-panel">
-      <div class="top-row">
-        <div class="brand-and-status">
-          <div class="brand">
-            <span class="brand-dot"></span>
-            <span>Watch Party · Rutube + VK Видео</span>
+    <header class="topbar">
+      <div class="topbar-main">
+        <div class="brand-group">
+          <div class="brand-title">
+            <span class="brand-icon">WP</span>
+            <span>Watch Party</span>
           </div>
-          <div class="status-badges">
-            <div class="badge" id="connectionBadge">
-              <span class="status-indicator" id="statusDot"></span>
-              <span id="statusText">Ожидание...</span>
-            </div>
-            <div class="badge" title="Количество подключенных друзей">
-              <span>Пиров:</span>
-              <strong id="peerCount">0</strong>
-            </div>
+          <div class="divider-v"></div>
+          <div class="status-pill" id="connectionBadge">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Подключение...</span>
           </div>
+          <div class="room-code" id="roomCodeLabel" title="ID текущей комнаты">Комната: ...</div>
         </div>
 
-        <div class="top-actions">
-          <button class="btn" id="copyRoomBtn" type="button">
-            📋 Скопировать ссылку на комнату
-          </button>
-          <button class="btn" id="newRoomBtn" type="button" title="Создать новую комнату как Хост">
-            ➕ Новая комната
-          </button>
+        <div class="topbar-controls">
+          <div class="name-field" title="Ваше имя, которое видят друзья в списке участников">
+            <label for="userNameInput">Имя:</label>
+            <input type="text" id="userNameInput" class="name-input" maxlength="20" placeholder="Ваше имя" />
+          </div>
+          <button class="btn" id="copyRoomBtn" type="button">Скопировать ссылку</button>
+          <button class="btn" id="newRoomBtn" type="button" title="Создать новую комнату">Новая комната</button>
         </div>
       </div>
 
-      <div class="url-bar">
+      <div class="url-row">
         <input
           type="text"
           id="videoUrlInput"
-          class="input-url"
-          placeholder="Ссылка на Rutube или VK Видео (rutube.ru/video/..., vkvideo.ru/video-123_456, код встраивания VK)"
+          class="input-text"
+          placeholder="Вставьте ссылку на видео Rutube или VK Видео (или код встраивания iframe)..."
           autocomplete="off"
         />
-        <button class="btn btn-primary" id="loadVideoBtn" type="button">
-          ▶ Загрузить для всех
-        </button>
+        <button class="btn btn-solid" id="loadVideoBtn" type="button">Загрузить для всех</button>
       </div>
     </header>
 
-    <!-- Основная часть: Адаптивный плеер 16:9 -->
-    <main class="player-wrapper">
-      <div class="player-placeholder" id="playerPlaceholder">
-        <div class="player-placeholder-icon">🎬</div>
-        <div class="player-placeholder-title">Видео ещё не выбрано</div>
-        <div class="player-placeholder-sub">
-          Вставьте ссылку на ролик с Rutube или VK Видео в поле выше и нажмите «Загрузить для всех», чтобы начать синхронный просмотр.
+    <!-- Основная рабочая область -->
+    <div class="workspace">
+      <!-- Левая колонка: Плеер и управление -->
+      <div class="player-column">
+        <main class="player-frame-wrap">
+          <div class="player-empty" id="playerPlaceholder">
+            <div class="player-empty-title">Видео не выбрано</div>
+            <div class="player-empty-desc">
+              Вставьте ссылку на ролик с Rutube или VK Видео в верхнее поле и нажмите «Загрузить для всех».
+            </div>
+          </div>
+          <iframe
+            id="videoPlayer"
+            src="about:blank"
+            allow="autoplay; fullscreen; picture-in-picture; encrypted-media; gyroscope; accelerometer; clipboard-write"
+            allowfullscreen
+          ></iframe>
+        </main>
+
+        <!-- Панель прямого контроля и синхронизации под плеером -->
+        <div class="transport-bar">
+          <div class="transport-left">
+            <button class="btn btn-solid" id="togglePlayPauseBtn" type="button" title="Запустить или поставить на паузу у всех">
+              Play / Пауза
+            </button>
+            <button class="btn" id="seekBackBtn" type="button" title="Перемотать на 10 секунд назад у всех">-10с</button>
+            <button class="btn" id="seekForwardBtn" type="button" title="Перемотать на 10 секунд вперед у всех">+10с</button>
+            <div class="local-readout">
+              <span id="localStateLabel" class="state-badge">Ожидание</span>
+              <span id="localTimeLabel" class="timecode-mono">00:00</span>
+            </div>
+          </div>
+
+          <div class="transport-right">
+            <button class="btn btn-blue" id="forceSyncBtn" type="button" title="Принудительно выставить всем участникам ваше текущее время и статус">
+              Раздать моё время всем
+            </button>
+            <button class="btn" id="pullSyncBtn" type="button" title="Синхронизировать ваш плеер с выбранным ориентиром или комнатой">
+              Выровняться с комнатой
+            </button>
+          </div>
         </div>
       </div>
-      <iframe
-        id="videoPlayer"
-        src="about:blank"
-        allow="autoplay; fullscreen; picture-in-picture; encrypted-media; gyroscope; accelerometer; clipboard-write"
-        allowfullscreen
-        webkitAllowFullScreen
-        mozallowfullscreen
-      ></iframe>
-    </main>
 
-    <!-- Нижняя панель -->
-    <footer class="bottom-panel">
-      <div class="controls-row">
-        <div class="sync-buttons">
-          <button class="btn btn-sync" id="forceSyncBtn" type="button">
-            ⚡ Синхронизировать всех ко мне
-          </button>
-          <button class="btn" id="pullSyncBtn" type="button" title="Подтянуть мой плеер к текущему времени комнаты">
-            🔄 Синхронизировать меня с комнатой
-          </button>
-        </div>
+      <!-- Правая колонка: Участники, их таймкоды и журнал -->
+      <aside class="sidebar-column">
+        <section class="panel-card">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span>Участники и время</span>
+              <span class="count-badge" id="peerCount">1</span>
+            </div>
+            <label class="auto-sync-toggle" title="Автоматически подравнивать ваш плеер, если время разошлось с ориентиром более чем на 2 сек.">
+              <input type="checkbox" id="autoSyncCheckbox" checked />
+              <span>Авто-подстройка</span>
+            </label>
+          </div>
 
-        <div class="player-telemetry">
-          <span>Локальный плеер:</span>
-          <span class="telemetry-pill" id="localStateLabel">Ожидание</span>
-          <span class="telemetry-pill" id="localTimeLabel">00:00</span>
-        </div>
-      </div>
+          <div class="sync-summary-box">
+            <div class="sync-target-row">
+              <span class="sync-target-label">К кому вы синхронизируетесь:</span>
+              <span class="sync-target-value" id="syncTargetLabel">Все (по Хосту)</span>
+            </div>
+          </div>
 
-      <div class="log-container" id="eventLog" aria-live="polite"></div>
-    </footer>
+          <div class="participants-list" id="participantsList"></div>
+        </section>
+
+        <section class="panel-card">
+          <div class="panel-header">
+            <div class="panel-title">Журнал событий</div>
+            <button class="btn btn-sm" id="clearLogBtn" type="button">Очистить</button>
+          </div>
+          <div class="log-list" id="eventLog" aria-live="polite"></div>
+        </section>
+      </aside>
+    </div>
   </div>
 
   <script>
@@ -485,12 +808,10 @@
 
       // --- Константы синхронизации ---
       const SYNC_THRESHOLD_SEC = 1.5;      // Порог рассинхрона при проверке во время воспроизведения
-      const PAUSE_SYNC_THRESHOLD = 0.35;   // При паузе выравниваем таймкод, если расхождение >= 0.35 сек
-      const DRIFT_BEACON_THRESHOLD = 1.15; // Порог авто-коррекции накопленной задержки во время игры
-      const BUFFER_RECOVERY_DIFF = 0.70;   // Порог догона после подгрузки (buffering) плеера
-      const REMOTE_LOCK_MS = 800;          // Защита от эхо-цикла (feedback loop)
-      const PLAY_SEEK_LEAD_SEC = 0.60;     // Компенсация буферизации при перемотке во время игры
-      const SENDER_START_HOLD_MS = 400;    // Микро-удержание теплого плеера при старте воспроизведения
+      const PAUSE_SYNC_THRESHOLD = 0.4;    // При паузе выравниваем таймкод, если расхождение >= 0.4 сек
+      const DRIFT_BEACON_THRESHOLD = 1.8;  // Порог авто-коррекции накопленной задержки во время игры
+      const REMOTE_LOCK_MS = 750;          // Защита от эхо-цикла (feedback loop) при программных командах
+      const PLAY_SEEK_LEAD_SEC = 0.25;     // Небольшая компенсация сетевой задержки при перемотке на лету
 
       // Конфигурация STUN серверов для обхода NAT и VPN в WebRTC (PeerJS)
       const PEERJS_CONFIG = {
@@ -503,9 +824,7 @@
             { urls: 'stun:stun2.l.google.com:19302' },
             { urls: 'stun:stun3.l.google.com:19302' },
             { urls: 'stun:stun4.l.google.com:19302' },
-            { urls: 'stun:stun.cloudflare.com:3478' },
-            { urls: 'stun:stun.services.mozilla.com' },
-            { urls: 'stun:stun.sipgate.net' }
+            { urls: 'stun:stun.cloudflare.com:3478' }
           ]
         }
       };
@@ -523,49 +842,60 @@
       // --- DOM элементы ---
       const statusDot = document.getElementById('statusDot');
       const statusText = document.getElementById('statusText');
+      const roomCodeLabel = document.getElementById('roomCodeLabel');
       const peerCountEl = document.getElementById('peerCount');
+      const userNameInput = document.getElementById('userNameInput');
       const copyRoomBtn = document.getElementById('copyRoomBtn');
       const newRoomBtn = document.getElementById('newRoomBtn');
       const videoUrlInput = document.getElementById('videoUrlInput');
       const loadVideoBtn = document.getElementById('loadVideoBtn');
       let playerIframe = document.getElementById('videoPlayer');
       const playerPlaceholder = document.getElementById('playerPlaceholder');
+      const togglePlayPauseBtn = document.getElementById('togglePlayPauseBtn');
+      const seekBackBtn = document.getElementById('seekBackBtn');
+      const seekForwardBtn = document.getElementById('seekForwardBtn');
       const forceSyncBtn = document.getElementById('forceSyncBtn');
       const pullSyncBtn = document.getElementById('pullSyncBtn');
       const localStateLabel = document.getElementById('localStateLabel');
       const localTimeLabel = document.getElementById('localTimeLabel');
+      const autoSyncCheckbox = document.getElementById('autoSyncCheckbox');
+      const syncTargetLabel = document.getElementById('syncTargetLabel');
+      const participantsListEl = document.getElementById('participantsList');
       const eventLog = document.getElementById('eventLog');
+      const clearLogBtn = document.getElementById('clearLogBtn');
 
       // --- Состояние плеера и синхронизации ---
       let currentEmbedUrl = '';
       let currentProvider = 'rutube';      // 'rutube' | 'vk'
       let vkPlayer = null;                 // Экземпляр VK.VideoPlayer
-      let vkPollTimer = null;
+      let vkInitTimer = null;              // Таймер инициализации postMessage моста VK
+      let vkBridgeReady = false;
       let localState = 'paused';           // 'playing' | 'paused'
       let localCurrentTime = 0;            // Последнее полученное время от плеера в секундах
       let lastTimeUpdateWallClock = 0;     // Wall-clock время последнего события currentTime (Date.now())
-      let hasVideoStartedOnce = false;     // ВАЖНО: в Rutube нельзя вызывать setCurrentTime до первого запуска видео (иначе бесконечная загрузка)
+      let hasVideoStartedOnce = false;     // Было ли видео запущено пользователем хотя бы раз
       let isRemoteAction = false;          // Флаг защиты от эхо-цикла
       let remoteActionTimer = null;
       let seekBroadcastTimer = null;
-      let senderHoldTimer = null;          // Таймер микро-удержания при старте воспроизведения
-      let pauseEnforceTimers = [];         // Таймеры повторного подтверждения паузы после перемотки
-      let pauseLockUntil = 0;              // Временная метка, до которой блокируются ложные авто-плей события плеера после перемотки/паузы
+      let pauseFollowupTimer = null;
       let lastStateBroadcastAt = 0;
       let lastBroadcastedState = '';
-      let lastManualSyncAt = 0;            // Время последней явной синхронизации (чтобы маяк не мешал)
-      let hadRemotePauseSeek = false;      // Был ли плеер перемотан на паузе чужой командой (холодный буфер)
-      let isLocalBuffering = false;        // Идет ли сейчас подгрузка (buffering) локального плеера
+      let lastManualSyncAt = 0;
+      let isLocalBuffering = false;
       let bufferingStartedAt = 0;
-      let consecutiveDriftCount = 0;       // Счетчик подряд идущих маяков с накопленным рассинхроном
-      let pendingInitSync = null;          // Целевое состояние комнаты для применения сразу после первого Play в плеере
-      let isInitialSyncing = false;        // Защита от шторма маяков при первой синхронизации после перезагрузки
+      let consecutiveDriftCount = 0;
+      let consecutiveForwardTicksWhilePaused = 0;
+      let pendingInitSync = null;
+      let isInitialSyncing = false;
+
+      // К кому мы синхронизируемся ('auto' = по Хосту / любому активному, либо конкретный senderId)
+      let syncTargetPeerId = 'auto';
 
       // --- Идентификация клиента и комнаты ---
       function generateShortId(prefix) {
         const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
         let id = prefix ? `${prefix}-` : '';
-        for (let i = 0; i < 8; i++) {
+        for (let i = 0; i < 6; i++) {
           id += chars.charAt(Math.floor(Math.random() * chars.length));
         }
         return id;
@@ -592,19 +922,42 @@
         isHost = true;
       }
 
+      roomCodeLabel.textContent = `Комната: ${roomId}`;
+
+      // Имя пользователя
+      let myUserName = '';
+      try {
+        myUserName = localStorage.getItem('wp_user_name') || '';
+      } catch (_) {}
+      if (!myUserName) {
+        myUserName = isHost ? 'Хост' : `Участник ${myClientId.slice(-4).toUpperCase()}`;
+      }
+      userNameInput.value = myUserName;
+
+      userNameInput.addEventListener('change', () => {
+        const val = userNameInput.value.trim();
+        myUserName = val || (isHost ? 'Хост' : `Участник ${myClientId.slice(-4).toUpperCase()}`);
+        userNameInput.value = myUserName;
+        try {
+          localStorage.setItem('wp_user_name', myUserName);
+        } catch (_) {}
+        broadcastMyTelemetry();
+        renderParticipantsUI();
+      });
+
       // --- Состояние сети (PeerJS + параллельный пул WSS) ---
       let peer = null;
       let hostConnection = null;           // Для гостя: WebRTC соединение с Хостом
       const guestConnections = new Map();  // Для Хоста: peerId -> DataConnection
-      const activeRoomPeers = new Map();   // clientId -> timestamp последней активности
-      const seenMessageIds = new Set();    // Дедупликация пакетов между WebRTC и WSS
+      // activeRoomPeers: senderId -> { id, name, role, state, time, timeUpdatedAt, lastSeen, embedUrl, transport }
+      const activeRoomPeers = new Map();
+      const seenMessageIds = new Set();
       let msgSeq = 0;
       let guestConnectedToRoom = false;
       let peerRetryTimer = null;
-      let peerRetryCount = 0;
 
       // Состояние параллельного пула WSS Relay
-      const wssPool = new Map();           // brokerUrl -> { socket, connected, pingTimer }
+      const wssPool = new Map();
       const roomTopic = `rutube-watch-party/v2/${roomId}`;
       const textEncoder = new TextEncoder();
       const textDecoder = new TextDecoder();
@@ -621,18 +974,30 @@
         return hrs > 0 ? `${hrs}:${mm}:${ss}` : `${mm}:${ss}`;
       }
 
-      // Вычисляет точное текущее время плеера с учетом миллисекунд, прошедших с последнего события currentTime
+      function formatSignedDelta(deltaSec) {
+        const sign = deltaSec > 0 ? '+' : '';
+        return `${sign}${deltaSec.toFixed(1)}с`;
+      }
+
       function getLiveCurrentTime() {
         if (localState === 'playing' && hasVideoStartedOnce && !isLocalBuffering && lastTimeUpdateWallClock > 0) {
           const elapsedSec = (Date.now() - lastTimeUpdateWallClock) / 1000;
-          if (elapsedSec > 0 && elapsedSec < 1.2) {
+          if (elapsedSec > 0 && elapsedSec < 1.5) {
             return localCurrentTime + elapsedSec;
           }
         }
         return localCurrentTime;
       }
 
-      // Вычисляет актуальное время отложенной синхронизации с учетом прошедшего времени
+      function getPeerLiveTime(peerInfo) {
+        if (!peerInfo || typeof peerInfo.time !== 'number') return 0;
+        if (peerInfo.state === 'playing' && peerInfo.timeUpdatedAt > 0) {
+          const elapsed = Math.min(3.0, Math.max(0, (Date.now() - peerInfo.timeUpdatedAt) / 1000));
+          return peerInfo.time + elapsed;
+        }
+        return peerInfo.time;
+      }
+
       function getPendingSyncLiveTime() {
         if (!pendingInitSync) return 0;
         const base = typeof pendingInitSync.time === 'number' ? pendingInitSync.time : 0;
@@ -643,78 +1008,46 @@
         return base;
       }
 
-      // Нормализует названия статусов плеера Rutube ('pause' / 'paused' / 'stopped' -> 'paused', 'play' / 'playing' -> 'playing')
       function normalizePlayerState(rawState) {
         if (!rawState || typeof rawState !== 'string') return null;
         const s = rawState.trim().toLowerCase();
-        if (s === 'playing' || s === 'play') return 'playing';
+        if (s === 'playing' || s === 'play' || s === 'started' || s === 'resumed') return 'playing';
         if (s === 'paused' || s === 'pause' || s === 'stopped' || s === 'completed' || s === 'ended') {
           return 'paused';
         }
         return null;
       }
 
-      function clearPauseEnforceTimers() {
-        while (pauseEnforceTimers.length > 0) {
-          clearTimeout(pauseEnforceTimers.pop());
+      function clearPauseFollowup() {
+        if (pauseFollowupTimer) {
+          clearTimeout(pauseFollowupTimer);
+          pauseFollowupTimer = null;
         }
       }
 
-      function clearSenderHoldTimer() {
-        if (senderHoldTimer) {
-          clearTimeout(senderHoldTimer);
-          senderHoldTimer = null;
+      function lockRemoteAction(durationMs = REMOTE_LOCK_MS) {
+        isRemoteAction = true;
+        if (remoteActionTimer) {
+          clearTimeout(remoteActionTimer);
         }
-      }
-
-      // Фиксация паузы лесенкой таймеров (защита от самовольного автоплея iframe Rutube и VK Видео после seek)
-      function enforcePauseLadder(durationMs = 1500) {
-        clearPauseEnforceTimers();
-        clearSenderHoldTimer();
-        pauseLockUntil = Math.max(pauseLockUntil, Date.now() + durationMs);
-        pausePlayer();
-        const steps = [100, 250, 450, 750, 1100, 1500];
-        steps.forEach((delay) => {
-          if (delay <= durationMs) {
-            pauseEnforceTimers.push(
-              setTimeout(() => {
-                if (localState === 'paused') {
-                  pausePlayer();
-                }
-              }, delay)
-            );
-          }
-        });
-      }
-
-      // Микро-удержание локального плеера при старте воспроизведения,
-      // чтобы за время полета сетевого пакета оба плеера стартовали одновременно
-      function holdLocalPlayerForCoordinatedStart(holdMs = SENDER_START_HOLD_MS) {
-        clearSenderHoldTimer();
-        clearPauseEnforceTimers();
-        lockRemoteAction(holdMs + 550);
-        playerCommand('pause');
-        senderHoldTimer = setTimeout(() => {
-          senderHoldTimer = null;
-          if (localState === 'playing' && Date.now() >= pauseLockUntil) {
-            lockRemoteAction(450);
-            playerCommand('play');
-          }
-        }, holdMs);
+        remoteActionTimer = setTimeout(() => {
+          isRemoteAction = false;
+          remoteActionTimer = null;
+        }, durationMs);
       }
 
       function addLog(message, type = 'info') {
         const now = new Date();
         const timeStr = now.toTimeString().split(' ')[0];
         const entry = document.createElement('div');
-        entry.className = `log-entry ${type}`;
+        entry.className = `log-item ${type}`;
 
         const timeSpan = document.createElement('span');
-        timeSpan.className = 'log-time';
-        timeSpan.textContent = `[${timeStr}]`;
+        timeSpan.className = 'log-ts';
+        timeSpan.textContent = timeStr;
 
         const msgSpan = document.createElement('span');
-        msgSpan.className = 'log-msg';
+        msgSpan.className = 'log-text';
         msgSpan.textContent = message;
 
         entry.appendChild(timeSpan);
@@ -723,35 +1056,15 @@
         eventLog.scrollTop = eventLog.scrollHeight;
       }
 
-      function updateTelemetryUI() {
-        if (!currentEmbedUrl) {
-          localStateLabel.textContent = 'Ожидание';
-        } else if (!hasVideoStartedOnce && pendingInitSync && (pendingInitSync.time > 1 || pendingInitSync.state === 'playing')) {
-          localStateLabel.textContent = '▶ Нажмите Play в плеере';
-        } else if (isLocalBuffering) {
-          localStateLabel.textContent = '⏳ Подгрузка';
-        } else {
-          localStateLabel.textContent = localState === 'playing' ? '▶ Играет' : '⏸ Пауза';
-        }
-        localTimeLabel.textContent = formatTimecode(localCurrentTime);
-      }
+      clearLogBtn.addEventListener('click', () => {
+        eventLog.innerHTML = '';
+      });
 
       function setConnectionStatus(label, mode) {
         statusText.textContent = label;
-        statusDot.className = 'status-indicator';
+        statusDot.className = 'status-dot';
         if (mode === 'online') statusDot.classList.add('online');
         if (mode === 'error') statusDot.classList.add('error');
-      }
-
-      function refreshPeerCountUI() {
-        const now = Date.now();
-        activeRoomPeers.forEach((lastSeen, cid) => {
-          if (now - lastSeen > 30000) {
-            activeRoomPeers.delete(cid);
-          }
-        });
-        const total = Math.max(activeRoomPeers.size, guestConnections.size);
-        peerCountEl.textContent = String(total);
       }
 
       function hasAnyOpenWss() {
@@ -761,22 +1074,257 @@
         return false;
       }
 
-      // --- Защита от эхо-цикла (feedback loop) ---
-      function lockRemoteAction(durationMs = REMOTE_LOCK_MS) {
-        isRemoteAction = true;
-        if (remoteActionTimer) {
-          clearTimeout(remoteActionTimer);
-        }
-        remoteActionTimer = setTimeout(() => {
-          isRemoteAction = false;
-        }, durationMs);
+      function getStateDisplayInfo(stateCode) {
+        if (stateCode === 'playing') return { text: '▶ Играет', cls: 'playing' };
+        if (stateCode === 'buffering') return { text: '⏳ Буферизация', cls: 'paused' };
+        if (stateCode === 'unstarted') return { text: 'Не запущен', cls: 'unstarted' };
+        return { text: '⏸ Пауза', cls: 'paused' };
       }
 
-      // --- Парсинг ссылки Rutube ---
+      function updateTelemetryUI() {
+        const myLive = getLiveCurrentTime();
+        localTimeLabel.textContent = formatTimecode(myLive);
+
+        if (!currentEmbedUrl) {
+          localStateLabel.textContent = 'Нет видео';
+          localStateLabel.className = 'state-badge unstarted';
+          togglePlayPauseBtn.textContent = 'Play / Пауза';
+        } else if (!hasVideoStartedOnce) {
+          localStateLabel.textContent = 'Нажмите Play в плеере';
+          localStateLabel.className = 'state-badge paused';
+          togglePlayPauseBtn.textContent = '▶ Запустить';
+        } else if (isLocalBuffering) {
+          localStateLabel.textContent = '⏳ Загрузка';
+          localStateLabel.className = 'state-badge paused';
+        } else if (localState === 'playing') {
+          localStateLabel.textContent = '▶ Играет';
+          localStateLabel.className = 'state-badge playing';
+          togglePlayPauseBtn.textContent = '⏸ Пауза для всех';
+        } else {
+          localStateLabel.textContent = '⏸ Пауза';
+          localStateLabel.className = 'state-badge paused';
+          togglePlayPauseBtn.textContent = '▶ Play для всех';
+        }
+      }
+
+      // Определяем, кто сейчас является нашим ориентиром для синхронизации
+      function getEffectiveTargetPeer() {
+        if (syncTargetPeerId !== 'auto' && activeRoomPeers.has(syncTargetPeerId)) {
+          return activeRoomPeers.get(syncTargetPeerId);
+        }
+        // Если выбран режим 'auto', ищем Хоста среди участников, иначе первого активного участника
+        let hostPeer = null;
+        let firstPeer = null;
+        activeRoomPeers.forEach((p) => {
+          if (!firstPeer) firstPeer = p;
+          if (p.role === 'host') hostPeer = p;
+        });
+        return hostPeer || firstPeer || null;
+      }
+
+      // --- Отрисовка списка участников и их живого времени ---
+      function renderParticipantsUI() {
+        const now = Date.now();
+        activeRoomPeers.forEach((p, cid) => {
+          if (now - p.lastSeen > 25000) {
+            activeRoomPeers.delete(cid);
+          }
+        });
+
+        if (syncTargetPeerId !== 'auto' && !activeRoomPeers.has(syncTargetPeerId)) {
+          syncTargetPeerId = 'auto';
+        }
+
+        const totalParticipants = 1 + activeRoomPeers.size;
+        peerCountEl.textContent = String(totalParticipants);
+
+        // Обновляем подпись текущего ориентира
+        const targetPeer = getEffectiveTargetPeer();
+        if (syncTargetPeerId === 'auto') {
+          if (isHost) {
+            syncTargetLabel.textContent = 'Вы — Хост (раздаёте время комнате)';
+          } else if (targetPeer) {
+            syncTargetLabel.textContent = `Авто (${targetPeer.name})`;
+          } else {
+            syncTargetLabel.textContent = 'Ожидание участников...';
+          }
+        } else if (targetPeer) {
+          syncTargetLabel.textContent = `Участник: ${targetPeer.name}`;
+        }
+
+        const myLive = getLiveCurrentTime();
+        const myEffectiveState = !currentEmbedUrl
+          ? 'unstarted'
+          : (!hasVideoStartedOnce ? 'unstarted' : (isLocalBuffering ? 'buffering' : localState));
+        const myStateInfo = getStateDisplayInfo(myEffectiveState);
+
+        const fragment = document.createDocumentFragment();
+
+        // 1. Карточка самого пользователя ("Вы")
+        const selfItem = document.createElement('div');
+        selfItem.className = 'participant-item';
+        selfItem.innerHTML = `
+          <div class="participant-top">
+            <div class="participant-identity">
+              <span class="participant-name"></span>
+              <span class="role-tag ${isHost ? 'host' : ''}">${isHost ? 'Хост' : 'Вы'}</span>
+            </div>
+            <div class="participant-actions">
+              <button type="button" class="btn btn-sm btn-blue" data-action="push-my-time">
+                Всех ко мне (${formatTimecode(myLive)})
+              </button>
+            </div>
+          </div>
+          <div class="participant-metrics">
+            <div class="state-And-time">
+              <span class="state-badge ${myStateInfo.cls}">${myStateInfo.text}</span>
+              <span class="timecode-mono">${formatTimecode(myLive)}</span>
+            </div>
+            <span class="drift-badge">Ваш плеер</span>
+          </div>
+        `;
+        selfItem.querySelector('.participant-name').textContent = `${myUserName} (Вы)`;
+        fragment.appendChild(selfItem);
+
+        // 2. Карточки подключенных друзей
+        activeRoomPeers.forEach((p) => {
+          const peerLive = getPeerLiveTime(p);
+          const pStateInfo = getStateDisplayInfo(p.state);
+          const delta = peerLive - myLive;
+          const absDelta = Math.abs(delta);
+          const isSynced = absDelta <= 1.5 && p.state === myEffectiveState;
+          const isSelectedTarget = (syncTargetPeerId === p.id) || (syncTargetPeerId === 'auto' && !isHost && targetPeer && targetPeer.id === p.id);
+
+          let driftText = '';
+          let driftCls = '';
+          if (p.state === 'unstarted') {
+            driftText = 'Ещё не запустил плеер';
+            driftCls = '';
+          } else if (isSynced) {
+            driftText = `Синхронно (${absDelta.toFixed(1)}с)`;
+            driftCls = 'synced';
+          } else {
+            driftText = `Разница: ${formatSignedDelta(delta)}`;
+            driftCls = 'warn';
+          }
+
+          const item = document.createElement('div');
+          item.className = `participant-item ${isSelectedTarget ? 'is-target' : ''}`;
+          item.innerHTML = `
+            <div class="participant-top">
+              <div class="participant-identity">
+                <span class="participant-name"></span>
+                <span class="role-tag ${p.role === 'host' ? 'host' : ''}">${p.role === 'host' ? 'Хост' : 'Друг'}</span>
+                ${isSelectedTarget ? '<span class="role-tag target">Ориентир</span>' : ''}
+              </div>
+              <div class="participant-actions">
+                <button type="button" class="btn btn-sm btn-solid" data-action="sync-to-peer" data-peer-id="${p.id}" title="Перемотать ваш плеер на время этого участника">
+                  К нему (${formatTimecode(peerLive)})
+                </button>
+                <button type="button" class="btn btn-sm" data-action="toggle-target" data-peer-id="${p.id}" title="Выбрать этого участника ориентиром для авто-подстройки">
+                  ${syncTargetPeerId === p.id ? 'Ориентир ✓' : 'Следовать'}
+                </button>
+              </div>
+            </div>
+            <div class="participant-metrics">
+              <div class="state-And-time">
+                <span class="state-badge ${pStateInfo.cls}">${pStateInfo.text}</span>
+                <span class="timecode-mono">${formatTimecode(peerLive)}</span>
+              </div>
+              <span class="drift-badge ${driftCls}">${driftText}</span>
+            </div>
+          `;
+          item.querySelector('.participant-name').textContent = p.name || `Участник ${p.id.slice(-4)}`;
+          fragment.appendChild(item);
+        });
+
+        participantsListEl.replaceChildren(fragment);
+      }
+
+      // Делегирование кликов по кнопкам внутри списка участников
+      participantsListEl.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        const action = btn.getAttribute('data-action');
+        const peerId = btn.getAttribute('data-peer-id');
+
+        if (action === 'push-my-time') {
+          forcePushMyTimeToAll();
+          return;
+        }
+
+        if (action === 'sync-to-peer' && peerId && activeRoomPeers.has(peerId)) {
+          const p = activeRoomPeers.get(peerId);
+          syncMyPlayerToPeer(p, true);
+          return;
+        }
+
+        if (action === 'toggle-target' && peerId) {
+          if (syncTargetPeerId === peerId) {
+            syncTargetPeerId = 'auto';
+            addLog('Режим ориентира переключен на автоматический', 'info');
+          } else {
+            syncTargetPeerId = peerId;
+            const p = activeRoomPeers.get(peerId);
+            if (p) {
+              addLog(`Ориентиром выбран участник ${p.name}`, 'sync');
+              syncMyPlayerToPeer(p, true);
+            }
+          }
+          renderParticipantsUI();
+        }
+      });
+
+      // Синхронизировать свой плеер к конкретному участнику
+      function syncMyPlayerToPeer(peerInfo, isManualClick = false) {
+        if (!peerInfo) return;
+        if (peerInfo.embedUrl && peerInfo.embedUrl !== currentEmbedUrl) {
+          loadEmbedVideo(peerInfo.embedUrl, {
+            isRemote: true,
+            initialTime: getPeerLiveTime(peerInfo),
+            initialState: peerInfo.state === 'playing' ? 'playing' : 'paused'
+          });
+          return;
+        }
+
+        if (!currentEmbedUrl) {
+          addLog('Сначала загрузите видео', 'warn');
+          return;
+        }
+
+        const targetTime = getPeerLiveTime(peerInfo);
+        const targetState = peerInfo.state === 'playing' ? 'playing' : 'paused';
+
+        if (!hasVideoStartedOnce) {
+          pendingInitSync = {
+            time: targetTime,
+            state: targetState,
+            receivedAt: Date.now()
+          };
+          playPlayer();
+          updateTelemetryUI();
+          addLog(`Запускаем плеер с переходом на ${formatTimecode(targetTime)} (${peerInfo.name}). Если автоплей заблокирован браузером — нажмите Play в плеере.`, 'sync');
+          return;
+        }
+
+        applyRemoteSyncCommand({
+          action: 'force-sync',
+          state: targetState,
+          time: targetTime,
+          embedUrl: currentEmbedUrl,
+          force: true,
+          senderName: peerInfo.name
+        });
+
+        if (isManualClick) {
+          addLog(`Вы синхронизировались к ${peerInfo.name} на ${formatTimecode(targetTime)}`, 'sync');
+        }
+      }
+
+      // --- Парсинг ссылок Rutube и VK Видео ---
       function parseRutubeToEmbed(rawInput) {
         if (!rawInput) return null;
         const input = rawInput.trim();
-
         const regex = /rutube\.ru\/(?:video\/(?:private\/)?|play\/embed\/|shorts\/)([a-zA-Z0-9_-]{16,64})/i;
         const match = input.match(regex);
 
@@ -795,7 +1343,6 @@
         }
 
         if (!videoId) return null;
-
         let embedUrl = `https://rutube.ru/play/embed/${videoId}`;
         if (privateKey) {
           embedUrl += `?p=${encodeURIComponent(privateKey)}`;
@@ -803,14 +1350,10 @@
         return embedUrl;
       }
 
-      // --- Парсинг ссылки VK Видео ---
-      // Поддерживает: код встраивания iframe, video_ext.php с hash, vkvideo.ru/video-123_456, vk.com/video-123_456,
-      // vk.com/video?z=video-123_456, клипы, vk.ru и m.vk.com.
       function parseVkToEmbed(rawInput) {
         if (!rawInput) return null;
         const input = rawInput.trim().replace(/&amp;/g, '&');
 
-        // 1. Код встраивания <iframe> или прямая ссылка video_ext.php
         const extMatch = input.match(/(https?:\/\/[^\s"'<>]*(?:vk\.com|vk\.ru|vkvideo\.ru)[^\s"'<>]*\/video_ext\.php\?[^\s"'<>]+)/i);
         if (extMatch) {
           try {
@@ -821,7 +1364,6 @@
           } catch (_) {}
         }
 
-        // Относительный или скопированный без домена video_ext.php
         const relMatch = input.match(/video_ext\.php\?([^\s"'<>]+)/i);
         if (relMatch) {
           const q = new URLSearchParams(relMatch[1]);
@@ -834,7 +1376,6 @@
           }
         }
 
-        // 2. Обычные ссылки на видео / клип: vkvideo.ru, vk.com, vk.ru
         const hostMatch = input.match(/https?:\/\/([a-zA-Z0-9\-_.]*(?:vk\.com|vk\.ru|vkvideo\.ru))/i);
         const host = hostMatch ? hostMatch[1] : 'vkvideo.ru';
 
@@ -864,7 +1405,7 @@
         return /(?:vk\.com|vk\.ru|vkvideo\.ru|video_ext\.php)/i.test(embedUrl || '') ? 'vk' : 'rutube';
       }
 
-      // --- VK Video Player JS API (https://vk.com/js/api/videoplayer.js) ---
+      // --- Интеграция VK Video Player API и postMessage моста ---
       let vkApiPromise = null;
 
       function loadScriptOnce(src) {
@@ -886,23 +1427,18 @@
         if (vkApiPromise) return vkApiPromise;
         vkApiPromise = loadScriptOnce('https://vk.com/js/api/videoplayer.js')
           .catch(() => loadScriptOnce('https://vk.ru/js/api/videoplayer.js'))
-          .then(() => {
-            if (!(window.VK && typeof window.VK.VideoPlayer === 'function')) {
-              throw new Error('VK.VideoPlayer недоступен');
-            }
-          })
-          .catch((err) => {
+          .catch(() => {
             vkApiPromise = null;
-            throw err;
           });
         return vkApiPromise;
       }
 
       function teardownVkPlayer() {
-        if (vkPollTimer) {
-          clearInterval(vkPollTimer);
-          vkPollTimer = null;
+        if (vkInitTimer) {
+          clearInterval(vkInitTimer);
+          vkInitTimer = null;
         }
+        vkBridgeReady = false;
         if (vkPlayer && typeof vkPlayer.destroy === 'function') {
           try {
             vkPlayer.destroy();
@@ -911,57 +1447,46 @@
         vkPlayer = null;
       }
 
-      function initVkPlayer(iframe) {
-        ensureVkApi()
-          .then(() => {
-            if (iframe !== playerIframe || currentProvider !== 'vk') return;
-            const player = window.VK.VideoPlayer(iframe);
-            vkPlayer = player;
-            let lastReportedTime = -1;
-
-            const reportTime = (t) => {
-              if (typeof t !== 'number' || isNaN(t) || t === lastReportedTime) return;
-              lastReportedTime = t;
-              handlePlayerTimeUpdate(t);
-            };
-
-            // VK события -> общие обработчики (те же, что и для Rutube)
-            player.on('inited', () => {
-              // Плеер VK готов
-            });
-            player.on('started', () => handlePlayerStateChange('playing'));
-            player.on('resumed', () => handlePlayerStateChange('playing'));
-            player.on('paused', () => handlePlayerStateChange('paused'));
-            player.on('ended', () => handlePlayerStateChange('ended'));
-            player.on('timeupdate', (state) => {
-              const t = typeof state === 'number' ? state : state && (state.time ?? state.currentTime);
-              reportTime(t);
-            });
-            player.on('error', (err) => {
-              const code = err && (err.errorCode || err.code || err);
-              if (code === 100 || code === 'autoplaySoundProhibited') {
-                addLog('Нажмите кнопку воспроизведения внутри плеера VK для включения звука', 'info');
-              } else {
-                addLog(`Сообщение плеера VK (код: ${code || '?'}). Если видео приватное, вставьте код встраивания с hash.`, 'warn');
-              }
-            });
-
-            // Резервный опрос времени
-            vkPollTimer = setInterval(() => {
-              if (vkPlayer !== player) return;
-              try {
-                if (player.getState && player.getState() === 'playing') {
-                  reportTime(player.getCurrentTime());
-                }
-              } catch (_) {}
-            }, 500);
-          })
-          .catch(() => {
-            addLog('Предупреждение: VK Video JS API недоступен, управление будет через postMessage', 'warn');
-          });
+      function sendVkInitMessage(iframe) {
+        if (!iframe || !iframe.contentWindow) return;
+        try {
+          iframe.contentWindow.postMessage({ method: 'init' }, '*');
+        } catch (_) {}
       }
 
-      // Пересоздает iframe под нужного провайдера (чтобы не оставалось старых слушателей)
+      function setupVkIframeBridge(iframe) {
+        vkBridgeReady = false;
+        let attempts = 0;
+
+        const onIframeLoaded = () => {
+          if (iframe !== playerIframe || currentProvider !== 'vk') return;
+          sendVkInitMessage(iframe);
+
+          ensureVkApi().then(() => {
+            if (iframe !== playerIframe || currentProvider !== 'vk') return;
+            if (window.VK && typeof window.VK.VideoPlayer === 'function' && !vkPlayer) {
+              try {
+                vkPlayer = window.VK.VideoPlayer(iframe);
+              } catch (_) {}
+            }
+          });
+        };
+
+        iframe.addEventListener('load', onIframeLoaded);
+
+        // Повторяем отправку { method: 'init' }, пока iframe VK не ответит первым событием
+        if (vkInitTimer) clearInterval(vkInitTimer);
+        vkInitTimer = setInterval(() => {
+          if (iframe !== playerIframe || currentProvider !== 'vk' || vkBridgeReady || attempts > 20) {
+            clearInterval(vkInitTimer);
+            vkInitTimer = null;
+            return;
+          }
+          attempts++;
+          sendVkInitMessage(iframe);
+        }, 450);
+      }
+
       function mountPlayerIframe(embedUrl) {
         teardownVkPlayer();
         const provider = getProviderFromEmbed(embedUrl);
@@ -977,30 +1502,37 @@
         playerIframe.replaceWith(fresh);
         playerIframe = fresh;
         currentProvider = provider;
-        if (provider === 'vk') initVkPlayer(fresh);
+        if (provider === 'vk') {
+          setupVkIframeBridge(fresh);
+        }
       }
 
-      // --- Унифицированные команды плеера (Rutube postMessage / VK JS API) ---
+      // --- Унифицированные команды плеера (Rutube и VK Видео) ---
       function playerCommand(cmd, arg) {
         if (!playerIframe || !currentEmbedUrl) return;
 
         if (currentProvider === 'vk') {
-          // 1. Через официальный VK VideoPlayer JS API
+          // 1. Отправка напрямую через postMessage в iframe VK (не блокируется очередью uninited)
+          if (playerIframe.contentWindow) {
+            try {
+              if (!vkBridgeReady) {
+                playerIframe.contentWindow.postMessage({ method: 'init' }, '*');
+              }
+              let m = null;
+              if (cmd === 'play') m = { method: 'play' };
+              else if (cmd === 'pause') m = { method: 'pause' };
+              else if (cmd === 'seek') m = { method: 'seek', time: arg };
+              if (m) {
+                playerIframe.contentWindow.postMessage(m, '*');
+              }
+            } catch (_) {}
+          }
+          // 2. Дублируем через объект VK.VideoPlayer, если он инициализирован
           if (vkPlayer) {
             try {
               if (cmd === 'play') vkPlayer.play();
               else if (cmd === 'pause') vkPlayer.pause();
               else if (cmd === 'seek') vkPlayer.seek(arg);
-            } catch (_) {}
-          }
-          // 2. Прямой postMessage в iframe VK (согласно протоколу videoplayer.js)
-          if (playerIframe.contentWindow) {
-            try {
-              let m = null;
-              if (cmd === 'play') m = { method: 'play' };
-              else if (cmd === 'pause') m = { method: 'pause' };
-              else if (cmd === 'seek') m = { method: 'seek', time: arg };
-              if (m) playerIframe.contentWindow.postMessage(m, '*');
             } catch (_) {}
           }
           return;
@@ -1020,12 +1552,11 @@
       }
 
       function playPlayer() {
-        clearPauseEnforceTimers();
+        clearPauseFollowup();
         playerCommand('play');
       }
 
       function pausePlayer() {
-        clearSenderHoldTimer();
         playerCommand('pause');
       }
 
@@ -1040,14 +1571,13 @@
         const { isRemote = false, initialTime = 0, initialState = 'paused', forceReload = false } = options;
         if (!embedUrl) return;
 
-        clearSenderHoldTimer();
-        clearPauseEnforceTimers();
-        pauseLockUntil = 0;
+        clearPauseFollowup();
         lockRemoteAction(800);
 
-        // Кэшируем видео для текущей комнаты в sessionStorage
         if (roomId) {
-          try { sessionStorage.setItem('wp_video_' + roomId, embedUrl); } catch (_) {}
+          try {
+            sessionStorage.setItem('wp_video_' + roomId, embedUrl);
+          } catch (_) {}
         }
 
         const isSameUrl = !forceReload && currentEmbedUrl === embedUrl && playerIframe && playerIframe.src === embedUrl;
@@ -1061,9 +1591,9 @@
           localCurrentTime = 0;
           localState = 'paused';
           lastTimeUpdateWallClock = 0;
-          hadRemotePauseSeek = false;
           isLocalBuffering = false;
           consecutiveDriftCount = 0;
+          consecutiveForwardTicksWhilePaused = 0;
 
           playerPlaceholder.classList.add('hidden');
           mountPlayerIframe(embedUrl);
@@ -1078,35 +1608,34 @@
           };
           updateTelemetryUI();
           addLog(
-            `Видео готово (${formatTimecode(targetTime)}). Нажмите Play в центре плеера для синхронного просмотра!`,
+            `Видео загружено (целевое время комнаты: ${formatTimecode(targetTime)}). Нажмите Play в плеере для старта.`,
             'sync'
           );
         } else {
           pendingInitSync = null;
           updateTelemetryUI();
-          addLog(
-            isRemote
-              ? `Загружено видео: ${embedUrl}`
-              : `Видео загружено для всех: ${embedUrl}`,
-            'sync'
-          );
+          addLog(isRemote ? 'Загружено новое видео в комнате' : 'Вы загрузили видео для всех участников', 'sync');
         }
+
+        broadcastMyTelemetry();
+        renderParticipantsUI();
       }
 
-      // Вызывается в момент, когда пользователь впервые запустил плеер (разблокировал автоплей)
+      // Применение отложенного состояния комнаты сразу после первого запуска плеера пользователем
       function applyPendingInitSyncOnFirstPlay() {
         if (!pendingInitSync) return;
         const syncState = pendingInitSync.state || 'playing';
         const syncTime = getPendingSyncLiveTime();
         pendingInitSync = null;
 
-        // Блокируем входящие эхо и фоновые маяки на 3.5 секунды, пока плеер инициализирует и подгружает буфер
-        lockRemoteAction(3500);
+        lockRemoteAction(2200);
         isInitialSyncing = true;
-        setTimeout(() => { isInitialSyncing = false; }, 3500);
-
-        // Даем 300 мс плееру инициализировать первый HLS-кадр, затем перематываем один раз без шторма
         setTimeout(() => {
+          isInitialSyncing = false;
+        }, 2500);
+
+        setTimeout(() => {
+          lockRemoteAction(1200);
           if (syncTime > 1.0) {
             seekPlayer(syncTime);
             localCurrentTime = syncTime;
@@ -1117,17 +1646,25 @@
             playPlayer();
           } else {
             localState = 'paused';
-            enforcePauseLadder(1800);
+            pausePlayer();
+            pauseFollowupTimer = setTimeout(() => {
+              if (localState === 'paused') {
+                lockRemoteAction(450);
+                pausePlayer();
+              }
+            }, 260);
           }
           updateTelemetryUI();
-          addLog(`Синхронизировано с комнатой на ${formatTimecode(syncTime)} (${syncState === 'playing' ? 'Играет' : 'Пауза'})`, 'sync');
+          broadcastMyTelemetry();
+          addLog(`Плеер синхронизирован с комнатой: ${formatTimecode(syncTime)} (${syncState === 'playing' ? 'Играет' : 'Пауза'})`, 'sync');
         }, 300);
       }
 
       // --- Применение входящей команды синхронизации ---
       function applyRemoteSyncCommand(payload) {
-        const { action, time, embedUrl, force = false, senderHadColdPause = false } = payload;
+        const { action, time, embedUrl, force = false, senderName } = payload;
         const state = normalizePlayerState(payload.state) || payload.state;
+        const actor = senderName || 'Участник';
 
         if (embedUrl && embedUrl !== currentEmbedUrl) {
           loadEmbedVideo(embedUrl, {
@@ -1138,18 +1675,14 @@
           return;
         }
 
-        // Если наш плеер еще ни разу не был запущен (например, после F5 обновления страницы),
-        // НЕ отправляем в него setCurrentTime (чтобы не повесить бесконечную загрузку Rutube!),
-        // а сохраняем актуальный таймкод и статус комнаты до клика по кнопке Play в плеере.
         if (!hasVideoStartedOnce) {
           pendingInitSync = {
             time: typeof time === 'number' ? time : 0,
             state: state || 'paused',
             receivedAt: Date.now()
           };
-          // Если в комнате нажали Play на самом старте ролика (00:00) — пробуем мягкий playPlayer() без seekPlayer()
           if (state === 'playing' && (!time || time < 1.5)) {
-            lockRemoteAction(600);
+            lockRemoteAction(700);
             playPlayer();
           }
           updateTelemetryUI();
@@ -1158,44 +1691,42 @@
 
         lastManualSyncAt = Date.now();
         consecutiveDriftCount = 0;
+        consecutiveForwardTicksWhilePaused = 0;
         isLocalBuffering = false;
-        clearSenderHoldTimer();
-        clearPauseEnforceTimers();
-        lockRemoteAction(REMOTE_LOCK_MS);
+        clearPauseFollowup();
+        lockRemoteAction(850);
 
         if (state === 'paused') {
           localState = 'paused';
+          let didSeek = false;
 
-          let didPauseSeek = false;
           if (typeof time === 'number' && !isNaN(time)) {
             const diff = Math.abs(time - localCurrentTime);
-            // Перематываем на паузе если нажата кнопка force-sync ИЛИ расхождение >= 0.35 сек.
-            if (action === 'force-sync' || diff >= PAUSE_SYNC_THRESHOLD) {
+            if (force || action === 'force-sync' || diff >= PAUSE_SYNC_THRESHOLD) {
               seekPlayer(time);
               localCurrentTime = time;
               lastTimeUpdateWallClock = Date.now();
-              didPauseSeek = true;
-              hadRemotePauseSeek = true;
+              didSeek = true;
             }
           }
 
-          if (didPauseSeek) {
-            lockRemoteAction(1600);
-            enforcePauseLadder(1600);
-          } else {
-            lockRemoteAction(800);
-            enforcePauseLadder(800);
+          pausePlayer();
+          if (didSeek) {
+            pauseFollowupTimer = setTimeout(() => {
+              if (localState === 'paused') {
+                lockRemoteAction(450);
+                pausePlayer();
+              }
+            }, 250);
           }
         } else if (state === 'playing') {
           localState = 'playing';
-          hadRemotePauseSeek = false;
           let didSeek = false;
 
           if (typeof time === 'number' && !isNaN(time)) {
             const diff = Math.abs(time - getLiveCurrentTime());
-            if (force || diff >= SYNC_THRESHOLD_SEC) {
-              const lead = action === 'force-sync' ? 0.35 : PLAY_SEEK_LEAD_SEC;
-              const targetTime = time + lead;
+            if (force || action === 'force-sync' || diff >= SYNC_THRESHOLD_SEC) {
+              const targetTime = time + PLAY_SEEK_LEAD_SEC;
               seekPlayer(targetTime);
               localCurrentTime = targetTime;
               lastTimeUpdateWallClock = Date.now();
@@ -1203,106 +1734,63 @@
             }
           }
 
-          if (!didSeek && senderHadColdPause) {
-            lockRemoteAction(650);
+          playPlayer();
+          if (didSeek) {
             setTimeout(() => {
               if (localState === 'playing') {
+                lockRemoteAction(450);
                 playPlayer();
               }
-            }, 220);
-          } else {
-            playPlayer();
-            if (didSeek) {
-              setTimeout(() => {
-                if (localState === 'playing') {
-                  lockRemoteAction(500);
-                  playPlayer();
-                }
-              }, 180);
-            }
+            }, 200);
           }
         }
 
         updateTelemetryUI();
+        broadcastMyTelemetry();
+        renderParticipantsUI();
 
         const tc = formatTimecode(typeof time === 'number' ? time : localCurrentTime);
         if (action === 'force-sync') {
-          addLog(`Принудительная синхронизация: ${state === 'playing' ? 'Воспроизведение' : 'Пауза'} на ${tc}`, 'sync');
+          addLog(`${actor} раздал время ${tc} (${state === 'playing' ? 'Играет' : 'Пауза'})`, 'sync');
         } else if (action === 'seek') {
-          addLog(`Друг перемотал на ${tc}`, 'sync');
+          addLog(`${actor} перемотал на ${tc}`, 'sync');
         } else if (state === 'playing') {
-          addLog(`Воспроизведение на ${tc}`, 'sync');
+          addLog(`${actor} включил воспроизведение на ${tc}`, 'sync');
         } else if (state === 'paused') {
-          addLog(`Пауза и синхронизация на ${tc}`, 'sync');
+          addLog(`${actor} поставил паузу на ${tc}`, 'sync');
         }
       }
 
-      // --- Авто-коррекция рассинхрона по маяку времени ---
-      function handleIncomingTimeBeacon(payload) {
-        if (!currentEmbedUrl || payload.embedUrl !== currentEmbedUrl) return;
+      // --- Плавная авто-подстройка времени по выбранному ориентиру ---
+      function checkAutoDriftSync() {
+        if (!autoSyncCheckbox.checked) return;
+        if (!currentEmbedUrl || !hasVideoStartedOnce || isInitialSyncing) return;
+        if (isRemoteAction || isLocalBuffering) return;
+        if (Date.now() - lastManualSyncAt < 3000) return;
 
-        const beaconState = normalizePlayerState(payload.state) || 'playing';
-        const remoteTime = payload.time;
-        if (typeof remoteTime !== 'number' || isNaN(remoteTime)) return;
+        // Если мы Хост и режим ориентира 'auto', то ориентиром являемся мы сами
+        if (isHost && syncTargetPeerId === 'auto') return;
 
-        // Если наш плеер еще не запущен пользователем — обновляем целевую точку в памяти
-        if (!hasVideoStartedOnce) {
-          pendingInitSync = {
-            time: remoteTime,
-            state: beaconState,
-            receivedAt: Date.now()
-          };
-          updateTelemetryUI();
-          return;
-        }
+        const targetPeer = getEffectiveTargetPeer();
+        if (!targetPeer || targetPeer.embedUrl !== currentEmbedUrl) return;
+        if (targetPeer.state !== 'playing' || localState !== 'playing') return;
 
-        // Если прямо сейчас идет первичная синхронизация буфера после первого запуска — игнорируем маяки
-        if (isInitialSyncing) return;
+        const targetLive = getPeerLiveTime(targetPeer);
+        const myLive = getLiveCurrentTime();
+        const drift = Math.abs(targetLive - myLive);
 
-        // 1. Срочный ответ по запросу пользователя (кнопка "Синхронизировать меня с комнатой" или после буферизации)
-        if (payload.urgent) {
-          consecutiveDriftCount = 0;
-          lockRemoteAction(2500);
-          isInitialSyncing = true;
-          setTimeout(() => { isInitialSyncing = false; }, 3000);
-
-          localCurrentTime = remoteTime;
-          lastTimeUpdateWallClock = Date.now();
-          seekPlayer(remoteTime);
-
-          if (beaconState === 'playing') {
-            localState = 'playing';
-            playPlayer();
-          } else {
-            localState = 'paused';
-            enforcePauseLadder(2000);
-          }
-          updateTelemetryUI();
-          addLog(`Синхронизировано с комнатой: ${formatTimecode(remoteTime)} (${beaconState === 'playing' ? 'Играет' : 'Пауза'})`, 'sync');
-          return;
-        }
-
-        // 2. Фоновый контроль плавного дрейфа времени во время воспроизведения
-        if (localState !== 'playing' || beaconState !== 'playing') return;
-        if (isRemoteAction || isLocalBuffering || senderHoldTimer || Date.now() < pauseLockUntil) return;
-        if (Date.now() - lastManualSyncAt < 2500) return;
-
-        const myLiveTime = getLiveCurrentTime();
-        const drift = Math.abs(remoteTime - myLiveTime);
-
-        // Плавный контроль накопленной со временем задержки (если 2 маяка подряд расхождение >= 1.15 сек)
         if (drift >= DRIFT_BEACON_THRESHOLD && drift < 300) {
           consecutiveDriftCount++;
           if (consecutiveDriftCount >= 2) {
             consecutiveDriftCount = 0;
-            const targetTime = remoteTime + PLAY_SEEK_LEAD_SEC;
-            lockRemoteAction(850);
-            seekPlayer(targetTime);
+            const alignedTime = targetLive + PLAY_SEEK_LEAD_SEC;
+            lockRemoteAction(800);
+            seekPlayer(alignedTime);
             playPlayer();
-            localCurrentTime = targetTime;
+            localCurrentTime = alignedTime;
             lastTimeUpdateWallClock = Date.now();
             updateTelemetryUI();
-            addLog(`Авто-выравнивание накопленной задержки (${formatTimecode(targetTime)})`, 'sync');
+            addLog(`Авто-выравнивание с ${targetPeer.name}: ${formatTimecode(alignedTime)}`, 'sync');
           }
         } else {
           consecutiveDriftCount = 0;
@@ -1313,23 +1801,34 @@
       window.addEventListener('message', (event) => {
         if (!event.data) return;
 
-        // 1. Прямые postMessage события от VK Видео (согласно API videoplayer.js)
+        // 1. События VK Видео
         if (currentProvider === 'vk') {
+          if (playerIframe && event.source && event.source !== playerIframe.contentWindow) {
+            return;
+          }
           let vkData = event.data;
           if (typeof vkData === 'string') {
-            try { vkData = JSON.parse(vkData); } catch (_) {}
-          }
-          if (vkData && typeof vkData.event === 'string') {
-            const ev = vkData.event.toLowerCase();
-            if (ev === 'started' || ev === 'resumed') {
-              handlePlayerStateChange('playing');
-            } else if (ev === 'paused') {
-              handlePlayerStateChange('paused');
-            } else if (ev === 'timeupdate' && typeof vkData.time === 'number') {
-              handlePlayerTimeUpdate(vkData.time);
-            } else if (ev === 'ended') {
-              handlePlayerStateChange('ended');
+            try {
+              vkData = JSON.parse(vkData);
+            } catch (_) {
+              return;
             }
+          }
+          if (!vkData || typeof vkData !== 'object') return;
+
+          vkBridgeReady = true;
+
+          const ev = typeof vkData.event === 'string' ? vkData.event.toLowerCase() : '';
+          if (ev === 'started' || ev === 'resumed' || ev === 'play' || ev === 'playing') {
+            handlePlayerStateChange('playing');
+          } else if (ev === 'paused' || ev === 'pause') {
+            handlePlayerStateChange('paused');
+          } else if (ev === 'ended') {
+            handlePlayerStateChange('ended');
+          } else if (ev === 'timeupdate' && typeof vkData.time === 'number') {
+            handlePlayerTimeUpdate(vkData.time);
+          } else if (ev === 'seeked' && typeof vkData.time === 'number') {
+            handlePlayerTimeUpdate(vkData.time);
           }
           return;
         }
@@ -1345,204 +1844,173 @@
 
           if (!message || typeof message.type !== 'string') return;
 
-          // 1. Текущее время плеера Rutube
           if (message.type === 'player:currentTime' && message.data && typeof message.data.time === 'number') {
             handlePlayerTimeUpdate(message.data.time);
             return;
           }
 
-          // 2. Смена статуса плеера Rutube
           if (message.type === 'player:changeState' && message.data) {
             handlePlayerStateChange(message.data.state);
           }
         }
       });
 
-      // --- Общий обработчик текущего времени плеера (Rutube и VK Видео) ---
+      // --- Общий обработчик текущего времени плеера ---
       function handlePlayerTimeUpdate(newTime) {
-          if (typeof newTime !== 'number' || isNaN(newTime)) return;
-          const now = Date.now();
-          const prevTime = localCurrentTime;
-          const elapsedWallSec = lastTimeUpdateWallClock > 0 ? (now - lastTimeUpdateWallClock) / 1000 : 0;
+        if (typeof newTime !== 'number' || isNaN(newTime)) return;
+        const now = Date.now();
+        const prevTime = localCurrentTime;
+        const elapsedWallSec = lastTimeUpdateWallClock > 0 ? (now - lastTimeUpdateWallClock) / 1000 : 0;
 
-          localCurrentTime = newTime;
-          lastTimeUpdateWallClock = now;
+        localCurrentTime = newTime;
+        lastTimeUpdateWallClock = now;
 
-          // Если плеер впервые пошел вперед (newTime > 0.1) — отмечаем, что видео инициализировано
-          if (!hasVideoStartedOnce && newTime > 0.1) {
+        if (!hasVideoStartedOnce && newTime > 0.1) {
+          hasVideoStartedOnce = true;
+          localState = 'playing';
+          if (pendingInitSync) {
+            applyPendingInitSyncOnFirstPlay();
+            return;
+          }
+        }
+
+        // Если плеер в режиме паузы, но время стабильно идет вперед само (более 3 тиков подряд вне удаленных команд),
+        // значит пользователь снял видео с паузы, но iframe не прислал событие resumed:
+        if (hasVideoStartedOnce && !isRemoteAction && elapsedWallSec > 0.05 && elapsedWallSec < 1.5) {
+          const forwardStep = newTime - prevTime;
+          if (forwardStep > 0.08 && forwardStep < 1.5) {
+            if (localState === 'paused') {
+              consecutiveForwardTicksWhilePaused++;
+              if (consecutiveForwardTicksWhilePaused >= 3) {
+                consecutiveForwardTicksWhilePaused = 0;
+                handlePlayerStateChange('playing');
+                return;
+              }
+            } else if (isLocalBuffering) {
+              isLocalBuffering = false;
+            }
+          } else {
+            consecutiveForwardTicksWhilePaused = 0;
+          }
+        }
+
+        updateTelemetryUI();
+
+        // Детектируем ручную перемотку ползунка пользователем внутри iframe
+        if (hasVideoStartedOnce && !isRemoteAction && elapsedWallSec > 0 && elapsedWallSec < 5) {
+          const expectedDelta = localState === 'playing' ? elapsedWallSec : 0;
+          const actualDelta = Math.abs(newTime - prevTime);
+          const drift = Math.abs(actualDelta - expectedDelta);
+
+          if (drift >= 2.3) {
+            if (seekBroadcastTimer) clearTimeout(seekBroadcastTimer);
+            seekBroadcastTimer = setTimeout(() => {
+              if (!isRemoteAction) {
+                lastManualSyncAt = Date.now();
+                const liveTime = getLiveCurrentTime();
+                addLog(`Вы перемотали на ${formatTimecode(liveTime)}`, 'info');
+                sendNetworkMessage({
+                  type: 'sync',
+                  action: 'seek',
+                  state: localState,
+                  time: liveTime,
+                  embedUrl: currentEmbedUrl,
+                  force: true,
+                  senderName: myUserName
+                });
+                broadcastMyTelemetry();
+              }
+            }, 70);
+          }
+        }
+      }
+
+      // --- Общий обработчик смены статуса плеера ---
+      function handlePlayerStateChange(rawStateInput) {
+        const rawState = String(rawStateInput || '').trim().toLowerCase();
+
+        if (rawState === 'buffering' || rawState === 'seeking') {
+          if (hasVideoStartedOnce && !isRemoteAction && localState === 'playing' && !isLocalBuffering) {
+            isLocalBuffering = true;
+            bufferingStartedAt = Date.now();
+            updateTelemetryUI();
+          }
+          return;
+        }
+
+        const normalizedState = normalizePlayerState(rawState);
+        if (!normalizedState) return;
+
+        consecutiveForwardTicksWhilePaused = 0;
+
+        // Первый запуск плеера пользователем
+        if (!hasVideoStartedOnce) {
+          if (normalizedState === 'playing') {
             hasVideoStartedOnce = true;
             localState = 'playing';
+            updateTelemetryUI();
+            broadcastMyTelemetry();
+
             if (pendingInitSync) {
               applyPendingInitSyncOnFirstPlay();
               return;
             }
-          }
-
-          // Если комната на паузе, но плеер самовольно пытается играть (артефакт буферизации/seek в Rutube/VK):
-          if (localState === 'paused' && hasVideoStartedOnce) {
-            const forwardStep = newTime - prevTime;
-            if (forwardStep > 0.08 && forwardStep < 3.0 && elapsedWallSec > 0.05 && elapsedWallSec < 1.5) {
-              pausePlayer();
-            }
-          }
-
-          // Если плеер в режиме воспроизведения и вышел из состояния буферизации
-          if (localState === 'playing' && isLocalBuffering && elapsedWallSec > 0.05 && elapsedWallSec < 1.2) {
-            const forwardStep = newTime - prevTime;
-            if (forwardStep > 0.05 && forwardStep < 1.5) {
-              isLocalBuffering = false;
-              sendNetworkMessage({
-                type: 'request-beacon',
-                embedUrl: currentEmbedUrl
-              });
-            }
-          }
-
-          updateTelemetryUI();
-
-          // Детектируем ручную перемотку ползунка пользователем внутри iframe
-          if (hasVideoStartedOnce && !isRemoteAction && Date.now() >= pauseLockUntil && elapsedWallSec > 0 && elapsedWallSec < 5) {
-            const expectedDelta = localState === 'playing' ? elapsedWallSec : 0;
-            const actualDelta = Math.abs(newTime - prevTime);
-            const drift = Math.abs(actualDelta - expectedDelta);
-
-            if (drift >= 2.2) {
-              if (localState === 'paused') {
-                enforcePauseLadder(1200);
-              }
-              if (seekBroadcastTimer) clearTimeout(seekBroadcastTimer);
-              seekBroadcastTimer = setTimeout(() => {
-                if (!isRemoteAction) {
-                  lastManualSyncAt = Date.now();
-                  const liveTime = getLiveCurrentTime();
-                  addLog(`Перемотка на ${formatTimecode(liveTime)}`, 'info');
-                  sendNetworkMessage({
-                    type: 'sync',
-                    action: 'seek',
-                    state: localState,
-                    time: liveTime,
-                    embedUrl: currentEmbedUrl,
-                    force: true
-                  });
-                }
-              }, 60);
-            }
-          }
-      }
-
-      // --- Общий обработчик смены статуса плеера (Rutube и VK Видео): 'playing', 'pause'/'paused', 'buffering' ---
-      function handlePlayerStateChange(rawStateInput) {
-          const rawState = String(rawStateInput || '').trim().toLowerCase();
-
-          // Отслеживаем начало подгрузки (buffering) ТОЛЬКО если видео уже реально запускалось
-          if (rawState === 'buffering' || rawState === 'seeking') {
-            if (hasVideoStartedOnce && !isRemoteAction && localState === 'playing' && !isLocalBuffering) {
-              isLocalBuffering = true;
-              bufferingStartedAt = Date.now();
-              updateTelemetryUI();
-            }
-            return;
-          }
-
-          const normalizedState = normalizePlayerState(rawState);
-          if (!normalizedState) {
-            return;
-          }
-
-          // ПЕРВЫЙ ЗАПУСК ПЛЕЕРА ПОЛЬЗОВАТЕЛЕМ (например, клик по Play после входа или обновления страницы F5)
-          if (!hasVideoStartedOnce) {
-            if (normalizedState === 'playing') {
-              hasVideoStartedOnce = true;
-              localState = 'playing';
-              updateTelemetryUI();
-
-              // Если в комнате уже идет просмотр (есть отложенная синхронизация) —
-              // НЕ рассылаем наш 00:00 в комнату, а сразу перематываем себя к таймкоду комнаты!
-              if (pendingInitSync) {
-                applyPendingInitSyncOnFirstPlay();
-                return;
-              }
-            } else {
-              // Пока видео ни разу не стартовало, игнорируем стартовые события pause/stopped от iframe
-              return;
-            }
-          }
-
-          // Если плеер только что вышел из подгрузки буфера (buffering -> playing) —
-          // НЕ рассылаем ложный Play остальным, а запрашиваем актуальное время комнаты, чтобы догнать поток!
-          if (isLocalBuffering && normalizedState === 'playing') {
-            isLocalBuffering = false;
-            updateTelemetryUI();
-            const bufferedMs = Date.now() - bufferingStartedAt;
-            if (bufferedMs >= 350 && !isRemoteAction) {
-              sendNetworkMessage({
-                type: 'request-beacon',
-                embedUrl: currentEmbedUrl
-              });
-            }
-            return;
-          }
-
-          isLocalBuffering = false;
-
-          // Защита от авто-воспроизведения (шторма событий после seek/buffering iframe) во время паузы
-          if (normalizedState === 'playing') {
-            if (isRemoteAction || Date.now() < pauseLockUntil) {
-              if (localState === 'paused') {
-                pausePlayer();
-              }
-              return;
-            }
-          } else if (normalizedState === 'paused') {
-            clearSenderHoldTimer();
-            if (isRemoteAction) {
-              return;
-            }
-          }
-
-          const now = Date.now();
-          if (normalizedState === lastBroadcastedState && now - lastStateBroadcastAt < 250) {
-            return;
-          }
-
-          const wasColdPause = hadRemotePauseSeek;
-          hadRemotePauseSeek = false;
-          localState = normalizedState;
-          lastBroadcastedState = normalizedState;
-          lastStateBroadcastAt = now;
-          lastManualSyncAt = now;
-          consecutiveDriftCount = 0;
-          updateTelemetryUI();
-
-          const syncTime = normalizedState === 'playing' ? getLiveCurrentTime() : localCurrentTime;
-          const tc = formatTimecode(syncTime);
-
-          // Отправляем событие всем пирам в комнате
-          sendNetworkMessage({
-            type: 'sync',
-            action: 'state-change',
-            state: localState,
-            time: syncTime,
-            embedUrl: currentEmbedUrl,
-            force: false,
-            senderHadColdPause: normalizedState === 'playing' && wasColdPause
-          });
-
-          if (normalizedState === 'playing') {
-            addLog(`Вы включили воспроизведение на ${tc}`, 'info');
-            if (activeRoomPeers.size > 0 || guestConnections.size > 0 || !isHost) {
-              const holdDuration = wasColdPause ? 160 : SENDER_START_HOLD_MS;
-              holdLocalPlayerForCoordinatedStart(holdDuration);
-            }
           } else {
-            clearSenderHoldTimer();
-            enforcePauseLadder(800);
-            addLog(`Вы поставили паузу на ${tc}`, 'info');
+            return;
           }
+        }
+
+        // Выход из буферизации
+        if (isLocalBuffering && normalizedState === 'playing') {
+          isLocalBuffering = false;
+          updateTelemetryUI();
+          return;
+        }
+
+        isLocalBuffering = false;
+
+        // Если переключение вызвано входящей сетевой командой — не отправляем эхо обратно
+        if (isRemoteAction) {
+          return;
+        }
+
+        const now = Date.now();
+        if (normalizedState === lastBroadcastedState && now - lastStateBroadcastAt < 250) {
+          return;
+        }
+
+        localState = normalizedState;
+        lastBroadcastedState = normalizedState;
+        lastStateBroadcastAt = now;
+        lastManualSyncAt = now;
+        consecutiveDriftCount = 0;
+        updateTelemetryUI();
+
+        const syncTime = normalizedState === 'playing' ? getLiveCurrentTime() : localCurrentTime;
+        const tc = formatTimecode(syncTime);
+
+        sendNetworkMessage({
+          type: 'sync',
+          action: 'state-change',
+          state: localState,
+          time: syncTime,
+          embedUrl: currentEmbedUrl,
+          force: false,
+          senderName: myUserName
+        });
+
+        broadcastMyTelemetry();
+        renderParticipantsUI();
+
+        if (normalizedState === 'playing') {
+          addLog(`Вы включили воспроизведение на ${tc}`, 'info');
+        } else {
+          addLog(`Вы поставили паузу на ${tc}`, 'info');
+        }
       }
 
       // =========================================================================
-      // СЕТЬ: Гибридный транспорт PeerJS (WebRTC DataChannel) + Пул WSS Relay
+      // СЕТЬ: Гибридный транспорт PeerJS (WebRTC) + Пул WSS Relay
       // =========================================================================
 
       function stampMessage(data) {
@@ -1551,6 +2019,9 @@
         }
         if (!data.senderId) {
           data.senderId = myClientId;
+        }
+        if (!data.senderName) {
+          data.senderName = myUserName;
         }
         return data;
       }
@@ -1569,7 +2040,6 @@
         const data = stampMessage({ ...rawPayload });
         seenMessageIds.add(data.msgId);
 
-        // 1. Отправка через PeerJS WebRTC DataChannel
         if (isHost) {
           broadcastFromHostWebRTC(data);
         } else if (hostConnection && hostConnection.open) {
@@ -1578,15 +2048,73 @@
           } catch (_) {}
         }
 
-        // 2. Параллельная отправка во все открытые WSS-брокеры (гарантия прохождения через любые VPN)
         publishWssMessage(data);
+      }
+
+      function broadcastMyTelemetry() {
+        const myEffectiveState = !currentEmbedUrl
+          ? 'unstarted'
+          : (!hasVideoStartedOnce ? 'unstarted' : (isLocalBuffering ? 'buffering' : localState));
+
+        sendNetworkMessage({
+          type: 'telemetry',
+          name: myUserName,
+          role: isHost ? 'host' : 'guest',
+          state: myEffectiveState,
+          time: getLiveCurrentTime(),
+          embedUrl: currentEmbedUrl
+        });
       }
 
       function markGuestConnected() {
         if (!guestConnectedToRoom) {
           guestConnectedToRoom = true;
-          setConnectionStatus('Подключено к комнате', 'online');
-          addLog('Успешно подключено к комнате!', 'peer');
+          setConnectionStatus('Подключено', 'online');
+          addLog('Успешно подключено к комнате', 'peer');
+        }
+      }
+
+      function upsertPeerFromMessage(data, webrtcSenderPeerId) {
+        if (!data.senderId || data.senderId === myClientId) return;
+        const isNew = !activeRoomPeers.has(data.senderId);
+        const existing = activeRoomPeers.get(data.senderId) || {
+          id: data.senderId,
+          name: data.senderName || data.name || `Участник ${data.senderId.slice(-4).toUpperCase()}`,
+          role: data.role || 'guest',
+          state: 'paused',
+          time: 0,
+          timeUpdatedAt: Date.now(),
+          lastSeen: Date.now(),
+          embedUrl: '',
+          transport: webrtcSenderPeerId ? 'P2P' : 'Relay'
+        };
+
+        existing.lastSeen = Date.now();
+        if (data.senderName || data.name) {
+          existing.name = data.senderName || data.name;
+        }
+        if (data.role) {
+          existing.role = data.role;
+        }
+        if (webrtcSenderPeerId) {
+          existing.transport = 'P2P';
+        }
+        if (typeof data.time === 'number' && !isNaN(data.time)) {
+          existing.time = data.time;
+          existing.timeUpdatedAt = Date.now();
+        }
+        if (data.state) {
+          existing.state = data.state;
+        }
+        if (data.embedUrl) {
+          existing.embedUrl = data.embedUrl;
+        }
+
+        activeRoomPeers.set(data.senderId, existing);
+
+        if (isNew) {
+          addLog(`Подключился участник: ${existing.name}`, 'peer');
+          renderParticipantsUI();
         }
       }
 
@@ -1594,41 +2122,29 @@
         if (!data || typeof data.type !== 'string') return;
         if (data.senderId === myClientId) return;
 
-        // Дедупликация сообщений между WebRTC и WSS-пулом
         if (data.msgId) {
           if (seenMessageIds.has(data.msgId)) return;
           seenMessageIds.add(data.msgId);
-          if (seenMessageIds.size > 800) {
+          if (seenMessageIds.size > 900) {
             const firstKey = seenMessageIds.values().next().value;
             seenMessageIds.delete(firstKey);
           }
         }
 
-        // Отслеживание присутствия участников
-        if (data.senderId) {
-          const isNewPeer = !activeRoomPeers.has(data.senderId);
-          activeRoomPeers.set(data.senderId, Date.now());
-          refreshPeerCountUI();
+        upsertPeerFromMessage(data, webrtcSenderPeerId);
 
-          if (isNewPeer) {
-            addLog(`Друг подключился (${data.senderId.slice(0, 6)})`, 'peer');
-          }
-        }
-
-        // Если мы Гость и получили любое сообщение от комнаты — значит связь с комнатой установлена
         if (!isHost && !guestConnectedToRoom) {
           markGuestConnected();
         }
 
-        // Полная ретрансляция и мост Хоста между WebRTC и WSS:
-        // 1. Сообщение гостя по WebRTC -> пересылаем другим WebRTC гостям И в WSS
-        // 2. Сообщение гостя по WSS -> пересылаем всем WebRTC гостям!
+        // Двусторонний мост Хоста между WebRTC и WSS
         if (isHost) {
           if (
             data.type === 'sync' ||
             data.type === 'load-video' ||
-            data.type === 'time-beacon' ||
-            data.type === 'request-beacon'
+            data.type === 'telemetry' ||
+            data.type === 'request-beacon' ||
+            data.type === 'presence'
           ) {
             if (webrtcSenderPeerId) {
               broadcastFromHostWebRTC(data, webrtcSenderPeerId);
@@ -1639,22 +2155,28 @@
           }
         }
 
-        // Обработка присутствия и рукопожатия комнаты
+        if (data.type === 'telemetry') {
+          checkAutoDriftSync();
+          return;
+        }
+
         if (data.type === 'presence') {
           if (data.action === 'leave' && data.senderId) {
+            const peerObj = activeRoomPeers.get(data.senderId);
+            const leftName = peerObj ? peerObj.name : data.senderId.slice(0, 6);
             activeRoomPeers.delete(data.senderId);
-            refreshPeerCountUI();
-            addLog(`Друг отключился (${data.senderId.slice(0, 6)})`, 'warn');
+            renderParticipantsUI();
+            addLog(`${leftName} покинул комнату`, 'warn');
             return;
           }
 
           if (data.action === 'join' || data.action === 'request-state') {
-            // Любой участник с известным видео делится текущим состоянием комнаты
+            broadcastMyTelemetry();
             if (currentEmbedUrl) {
               sendNetworkMessage({
                 type: 'welcome',
                 targetId: data.senderId,
-                peerCount: Math.max(activeRoomPeers.size, guestConnections.size),
+                role: isHost ? 'host' : 'guest',
                 embedUrl: currentEmbedUrl,
                 time: getLiveCurrentTime(),
                 state: localState
@@ -1664,11 +2186,12 @@
           return;
         }
 
-        // Запрос маяка времени (после подгрузки буфера или кнопки "Синхронизировать меня с комнатой")
         if (data.type === 'request-beacon') {
+          broadcastMyTelemetry();
           if (currentEmbedUrl && !isLocalBuffering) {
             sendNetworkMessage({
-              type: 'time-beacon',
+              type: 'welcome',
+              role: isHost ? 'host' : 'guest',
               embedUrl: currentEmbedUrl,
               time: getLiveCurrentTime(),
               state: localState,
@@ -1678,17 +2201,9 @@
           return;
         }
 
-        if (data.type === 'time-beacon') {
-          handleIncomingTimeBeacon(data);
-          return;
-        }
-
         if (data.type === 'welcome') {
           if (!isHost) {
             markGuestConnected();
-          }
-          if (typeof data.peerCount === 'number') {
-            peerCountEl.textContent = String(Math.max(data.peerCount, activeRoomPeers.size));
           }
           if (data.embedUrl) {
             if (data.embedUrl !== currentEmbedUrl) {
@@ -1704,17 +2219,15 @@
                 receivedAt: Date.now()
               };
               updateTelemetryUI();
-            } else if (hasVideoStartedOnce && typeof data.time === 'number') {
-              const diff = Math.abs(data.time - getLiveCurrentTime());
-              if (diff >= SYNC_THRESHOLD_SEC || data.state !== localState) {
-                applyRemoteSyncCommand({
-                  action: 'force-sync',
-                  time: data.time,
-                  state: data.state || 'paused',
-                  embedUrl: data.embedUrl,
-                  force: true
-                });
-              }
+            } else if (hasVideoStartedOnce && typeof data.time === 'number' && data.urgent) {
+              applyRemoteSyncCommand({
+                action: 'force-sync',
+                time: data.time,
+                state: data.state || 'paused',
+                embedUrl: data.embedUrl,
+                force: true,
+                senderName: data.senderName
+              });
             }
           }
           return;
@@ -1734,11 +2247,11 @@
         }
       }
 
-      // --- 1. Инициализация PeerJS (WebRTC) + WSS пула ---
+      // --- Инициализация сети ---
       function initPeerNetwork() {
         if (isHost) {
-          setConnectionStatus('Хост', 'online');
-          addLog(`Комната создана (${roomId}). Вы — Хост.`, 'peer');
+          setConnectionStatus('Хост комнаты', 'online');
+          addLog(`Комната ${roomId} активна. Вы — Хост.`, 'peer');
         } else {
           setConnectionStatus('Подключение...', 'waiting');
           addLog(`Подключение к комнате ${roomId}...`, 'info');
@@ -1746,10 +2259,13 @@
 
         startPeerInstance();
         initWssPool();
+        renderParticipantsUI();
 
-        // Повторяем запрос статуса комнаты, пока видео не подтверждено и плеер не активен
+        // Повторяем рукопожатие при входе
+        let handshakeAttempts = 0;
         const joinHandshakeInterval = setInterval(() => {
-          if (currentEmbedUrl && hasVideoStartedOnce) {
+          handshakeAttempts++;
+          if ((currentEmbedUrl && hasVideoStartedOnce) || handshakeAttempts > 10) {
             clearInterval(joinHandshakeInterval);
             return;
           }
@@ -1760,16 +2276,19 @@
           });
         }, 2200);
 
-        // Периодический heartbeat присутствия + авто-восстановление WebRTC у гостя
+        // Регулярная рассылка телеметрии своего времени всем участникам (каждые 1.8 сек)
         setInterval(() => {
-          sendNetworkMessage({
-            type: 'presence',
-            action: 'heartbeat',
-            role: isHost ? 'host' : 'guest'
-          });
-          refreshPeerCountUI();
+          broadcastMyTelemetry();
+        }, 1800);
 
-          // Фоновый контроль живучести WebRTC соединения у гостя
+        // Локальное плавное обновление UI таймкодов и таблицы участников (каждые 500 мс)
+        setInterval(() => {
+          updateTelemetryUI();
+          renderParticipantsUI();
+        }, 500);
+
+        // Фоновый контроль живучести WebRTC соединения у гостя
+        setInterval(() => {
           if (!isHost && (!hostConnection || !hostConnection.open)) {
             if (peer && !peer.destroyed && peer.open) {
               connectToHostWebRTC(roomId);
@@ -1786,29 +2305,6 @@
             }
           });
         }, 12000);
-
-        // Периодический маяк времени от Хоста (каждые 4.5 сек во время воспроизведения),
-        // чтобы у друзей не накапливалась задержка со временем и компенсировались микрофризы
-        setInterval(() => {
-          if (
-            isHost &&
-            currentEmbedUrl &&
-            hasVideoStartedOnce &&
-            localState === 'playing' &&
-            !isLocalBuffering &&
-            !isRemoteAction &&
-            !senderHoldTimer &&
-            (activeRoomPeers.size > 0 || guestConnections.size > 0)
-          ) {
-            sendNetworkMessage({
-              type: 'time-beacon',
-              embedUrl: currentEmbedUrl,
-              time: getLiveCurrentTime(),
-              state: 'playing',
-              urgent: false
-            });
-          }
-        }, 4500);
 
         window.addEventListener('beforeunload', () => {
           sendNetworkMessage({
@@ -1829,7 +2325,7 @@
 
         peer.on('open', () => {
           if (isHost) {
-            setConnectionStatus('Хост', 'online');
+            setConnectionStatus('Хост комнаты', 'online');
           } else {
             connectToHostWebRTC(roomId);
           }
@@ -1840,15 +2336,14 @@
 
           conn.on('open', () => {
             guestConnections.set(conn.peer, conn);
-            refreshPeerCountUI();
-
             conn.send(stampMessage({
               type: 'welcome',
-              peerCount: Math.max(activeRoomPeers.size, guestConnections.size),
+              role: 'host',
               embedUrl: currentEmbedUrl,
               time: getLiveCurrentTime(),
               state: localState
             }));
+            broadcastMyTelemetry();
           });
 
           conn.on('data', (data) => {
@@ -1857,12 +2352,10 @@
 
           conn.on('close', () => {
             guestConnections.delete(conn.peer);
-            refreshPeerCountUI();
           });
 
           conn.on('error', () => {
             guestConnections.delete(conn.peer);
-            refreshPeerCountUI();
           });
         });
 
@@ -1889,7 +2382,6 @@
             }
             if (errType === 'server-error' || errType === 'socket-error' || errType === 'socket-closed') {
               setTimeout(() => startPeerInstance(), 3500);
-              return;
             }
           }
         });
@@ -1931,6 +2423,7 @@
             action: 'join',
             role: 'guest'
           }));
+          broadcastMyTelemetry();
         });
 
         hostConnection.on('data', (data) => {
@@ -1952,7 +2445,7 @@
         });
       }
 
-      // --- 2. Параллельный пул MQTT 3.1.1 over WSS (обход любых блокировок VPN/NAT) ---
+      // --- Параллельный пул MQTT 3.1.1 over WSS ---
       function mqttEncodeLength(len) {
         const bytes = [];
         do {
@@ -2020,7 +2513,9 @@
             existing.pingTimer = null;
           }
           if (existing.socket && (existing.socket.readyState === WebSocket.OPEN || existing.socket.readyState === WebSocket.CONNECTING)) {
-            try { existing.socket.close(); } catch (_) {}
+            try {
+              existing.socket.close();
+            } catch (_) {}
           }
         }
 
@@ -2076,7 +2571,6 @@
             const packetEnd = idx + remLen;
             if (packetEnd > buf.length) break;
 
-            // CONNACK (успешное подключение к MQTT брокеру)
             if (packetType === 2) {
               clearTimeout(connectTimeout);
               state.connected = true;
@@ -2103,10 +2597,10 @@
                   action: 'join',
                   role: isHost ? 'host' : 'guest'
                 });
+                broadcastMyTelemetry();
               }, 100);
             }
 
-            // PUBLISH (входящее сообщение из комнаты)
             if (packetType === 3) {
               const qos = (buf[offset] >> 1) & 0x03;
               const topicLen = (buf[idx] << 8) | buf[idx + 1];
@@ -2145,7 +2639,7 @@
         try {
           await navigator.clipboard.writeText(shareUrl);
           const originalText = copyRoomBtn.textContent;
-          copyRoomBtn.textContent = '✅ Ссылка скопирована!';
+          copyRoomBtn.textContent = 'Ссылка скопирована';
           addLog('Ссылка на комнату скопирована в буфер обмена', 'info');
           setTimeout(() => {
             copyRoomBtn.textContent = originalText;
@@ -2159,7 +2653,9 @@
         const freshRoomId = generateShortId('wp');
         sessionStorage.setItem('wp_host_room', freshRoomId);
         if (currentEmbedUrl) {
-          try { sessionStorage.setItem('wp_video_' + freshRoomId, currentEmbedUrl); } catch (_) {}
+          try {
+            sessionStorage.setItem('wp_video_' + freshRoomId, currentEmbedUrl);
+          } catch (_) {}
         }
         window.location.href = `${window.location.pathname}?room=${encodeURIComponent(freshRoomId)}`;
       });
@@ -2169,7 +2665,7 @@
         const embedUrl = parseVideoUrl(rawUrl);
 
         if (!embedUrl) {
-          addLog('Неверная ссылка. Примеры: https://rutube.ru/video/c6582a09.../ или https://vkvideo.ru/video-123_456', 'warn');
+          addLog('Некорректная ссылка. Вставьте ссылку на Rutube, VK Видео или код iframe.', 'warn');
           videoUrlInput.focus();
           return;
         }
@@ -2185,6 +2681,7 @@
       }
 
       loadVideoBtn.addEventListener('click', handleLoadVideoClick);
+
       videoUrlInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
@@ -2192,26 +2689,89 @@
         }
       });
 
-      forceSyncBtn.addEventListener('click', () => {
+      // Кнопка Play / Пауза для всех прямо под плеером
+      togglePlayPauseBtn.addEventListener('click', () => {
+        if (!currentEmbedUrl) {
+          addLog('Сначала загрузите видео', 'warn');
+          return;
+        }
+
+        const nextState = (!hasVideoStartedOnce || localState === 'paused') ? 'playing' : 'paused';
+        hasVideoStartedOnce = true;
+        localState = nextState;
+        lastBroadcastedState = nextState;
+        lastStateBroadcastAt = Date.now();
+        lastManualSyncAt = Date.now();
+        lastTimeUpdateWallClock = Date.now();
+
+        lockRemoteAction(750);
+        if (nextState === 'playing') {
+          playPlayer();
+        } else {
+          pausePlayer();
+        }
+
+        const liveTime = getLiveCurrentTime();
+        updateTelemetryUI();
+        sendNetworkMessage({
+          type: 'sync',
+          action: 'state-change',
+          state: localState,
+          time: liveTime,
+          embedUrl: currentEmbedUrl,
+          force: false,
+          senderName: myUserName
+        });
+        broadcastMyTelemetry();
+        renderParticipantsUI();
+        addLog(`Вы переключили состояние на: ${nextState === 'playing' ? 'Воспроизведение' : 'Пауза'} (${formatTimecode(liveTime)})`, 'info');
+      });
+
+      function stepSeekBy(deltaSeconds) {
+        if (!currentEmbedUrl || !hasVideoStartedOnce) {
+          addLog('Сначала запустите видео в плеере', 'warn');
+          return;
+        }
+        const target = Math.max(0, getLiveCurrentTime() + deltaSeconds);
+        lockRemoteAction(750);
+        seekPlayer(target);
+        localCurrentTime = target;
+        lastTimeUpdateWallClock = Date.now();
+        lastManualSyncAt = Date.now();
+        updateTelemetryUI();
+
+        sendNetworkMessage({
+          type: 'sync',
+          action: 'seek',
+          state: localState,
+          time: target,
+          embedUrl: currentEmbedUrl,
+          force: true,
+          senderName: myUserName
+        });
+        broadcastMyTelemetry();
+        renderParticipantsUI();
+        addLog(`Перемотка на ${formatTimecode(target)}`, 'info');
+      }
+
+      seekBackBtn.addEventListener('click', () => stepSeekBy(-10));
+      seekForwardBtn.addEventListener('click', () => stepSeekBy(10));
+
+      function forcePushMyTimeToAll() {
         if (!currentEmbedUrl) {
           addLog('Сначала загрузите видео для синхронизации', 'warn');
           return;
         }
 
-        // Если наш плеер еще не был запущен (висит на 00:00 после входа/F5) —
-        // вместо сброса всей комнаты в 00:00 запрашиваем синхронизацию у комнаты
         if (!hasVideoStartedOnce && pendingInitSync) {
-          addLog('Сначала нажмите кнопку Play внутри самого плеера, чтобы разблокировать воспроизведение', 'warn');
+          addLog('Сначала запустите свой плеер', 'warn');
           return;
         }
 
         lastManualSyncAt = Date.now();
         const liveTime = getLiveCurrentTime();
         const tc = formatTimecode(liveTime);
-        addLog(
-          `Вы запустили принудительную синхронизацию всех ко времени ${tc} (${localState === 'playing' ? 'Играет' : 'Пауза'})`,
-          'sync'
-        );
+        addLog(`Вы раздали всем участникам своё время: ${tc} (${localState === 'playing' ? 'Играет' : 'Пауза'})`, 'sync');
 
         sendNetworkMessage({
           type: 'sync',
@@ -2219,19 +2779,24 @@
           state: localState,
           time: liveTime,
           embedUrl: currentEmbedUrl,
-          force: true
+          force: true,
+          senderName: myUserName
         });
+        broadcastMyTelemetry();
+        renderParticipantsUI();
+      }
 
-        if (localState === 'playing') {
-          // Не дергаем плеер паузой, если видео уже плавно играет у инициатора
-        } else {
-          enforcePauseLadder(800);
-        }
-      });
+      forceSyncBtn.addEventListener('click', forcePushMyTimeToAll);
 
       pullSyncBtn.addEventListener('click', () => {
+        const targetPeer = getEffectiveTargetPeer();
+        if (targetPeer && targetPeer.embedUrl) {
+          syncMyPlayerToPeer(targetPeer, true);
+          return;
+        }
+
         if (!currentEmbedUrl) {
-          addLog('Запрос текущего видео и состояния у комнаты...', 'info');
+          addLog('Запрос текущего видео у комнаты...', 'info');
           sendNetworkMessage({
             type: 'presence',
             action: 'request-state',
@@ -2240,28 +2805,25 @@
           return;
         }
 
-        addLog('Запрос точного таймкода комнаты...', 'info');
+        addLog('Запрос актуального времени у участников комнаты...', 'info');
         sendNetworkMessage({
           type: 'request-beacon',
           embedUrl: currentEmbedUrl
         });
-
-        // Если плеер еще не запускался, пробуем запустить
-        if (!hasVideoStartedOnce) {
-          playPlayer();
-          addLog('Если видео не запустилось автоматически, нажмите Play в самом плеере', 'info');
-        }
       });
 
-      // Восстанавливаем видео из кэша комнаты в sessionStorage (для мгновенного открытия после F5)
-      const cachedVideoForRoom = (function() {
-        try { return sessionStorage.getItem('wp_video_' + roomId); } catch (_) { return null; }
+      // Восстанавливаем видео из кэша комнаты в sessionStorage
+      const cachedVideoForRoom = (function () {
+        try {
+          return sessionStorage.getItem('wp_video_' + roomId);
+        } catch (_) {
+          return null;
+        }
       })();
       if (cachedVideoForRoom) {
         loadEmbedVideo(cachedVideoForRoom, { isRemote: true, initialTime: 0, initialState: 'paused' });
       }
 
-      // Запуск приложения
       initPeerNetwork();
     })();
   </script>
